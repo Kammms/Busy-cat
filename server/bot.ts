@@ -114,7 +114,7 @@ export class DiscordBot {
             const exposeEmbed = new EmbedBuilder()
               .setTitle('👀 Caught in 4K')
               .setDescription(
-                `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> face rev channel. 💀 Freak.`
+                `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> face rev channel. 💀 Freak. (Or create a ticket to change your gender role)`
               )
               .setThumbnail(newMember.user.displayAvatarURL())
               .setColor(0xd2a4bf)
