@@ -65,4 +65,10 @@ export const SETTINGS_KEYS = {
   GENDER_ROLE_IDS: 'gender_role_ids',
   GENDER_LOG_CHANNEL_ID: 'gender_log_channel_id',
   GENDER_EXPOSE_CHANNEL_ID: 'gender_expose_channel_id',
+  GENDER_BYPASS_ROLE_ID: 'gender_bypass_role_id',
+  AGE_MINOR_ROLE_IDS: 'age_minor_role_ids',
+  AGE_ADULT_ROLE_ID: 'age_adult_role_id',
+  AGE_LOG_CHANNEL_ID: 'age_log_channel_id',
+  AGE_EXPOSE_CHANNEL_ID: 'age_expose_channel_id',
+  AGE_BYPASS_ROLE_ID: 'age_bypass_role_id',
 } as const;
