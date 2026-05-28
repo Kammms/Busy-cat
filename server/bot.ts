@@ -81,13 +81,24 @@ export class DiscordBot {
       // Only act if they had a gender role and switched to a different one
       if (!oldGenderRole || !newGenderRole || oldGenderRole === newGenderRole) return;
 
+      // Check if the change was made by someone with the bypass role (e.g. an admin)
+      const genderBypassRoleId = await storage.getSetting(SETTINGS_KEYS.GENDER_BYPASS_ROLE_ID);
+      if (genderBypassRoleId) {
+        try {
+          const logs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 5 });
+          const entry = logs.entries.find(e => (e.target as any)?.id === newMember.id);
+          if (entry?.executor) {
+            const executor = await newMember.guild.members.fetch(entry.executor.id).catch(() => null);
+            if (executor?.roles.cache.has(genderBypassRoleId)) return;
+          }
+        } catch {}
+      }
+
       try {
-        // Revert: remove the new role, re-add the original
         await newMember.roles.remove(newGenderRole);
         await newMember.roles.add(oldGenderRole);
         console.log(`Reverted gender role switch for ${newMember.user.username}`);
 
-        // Private admin log embed
         const logChannelId = await storage.getSetting(SETTINGS_KEYS.GENDER_LOG_CHANNEL_ID);
         if (logChannelId) {
           const logChannel = newMember.guild.channels.cache.get(logChannelId);
@@ -107,7 +118,6 @@ export class DiscordBot {
           }
         }
 
-        // Public expose embed
         const exposeChannelId = await storage.getSetting(SETTINGS_KEYS.GENDER_EXPOSE_CHANNEL_ID);
         if (exposeChannelId) {
           const exposeChannel = newMember.guild.channels.cache.get(exposeChannelId);
@@ -125,7 +135,68 @@ export class DiscordBot {
         }
       } catch (err) {
         console.error(`Failed to revert gender role for ${newMember.user.username}:`, err);
-      }
+           }
+      // --- Age role protection (minors trying to access adult channel) ---
+      const ageAdultRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
+      const ageMinorRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS);
+      if (!ageAdultRoleId || !ageMinorRoleIdsSetting) return;
+      const ageMinorRoleIds = ageMinorRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
+      const hadMinorRole = ageMinorRoleIds.some(id => oldMember.roles.cache.has(id));
+      const nowHasAdultRole = newMember.roles.cache.has(ageAdultRoleId);
+      const hadAdultRole = oldMember.roles.cache.has(ageAdultRoleId);
+      if (hadMinorRole && nowHasAdultRole && !hadAdultRole) {
+        // Check bypass role
+        const ageBypassRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID);
+        if (ageBypassRoleId) {
+          try {
+            const logs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 5 });
+            const entry = logs.entries.find(e => (e.target as any)?.id === newMember.id);
+            if (entry?.executor) {
+              const executor = await newMember.guild.members.fetch(entry.executor.id).catch(() => null);
+              if (executor?.roles.cache.has(ageBypassRoleId)) return;
+            }
+          } catch {}
+        }
+        const originalMinorRole = ageMinorRoleIds.find(id => oldMember.roles.cache.has(id))!;
+        try {
+          await newMember.roles.remove(ageAdultRoleId);
+          console.log(`Reverted age role switch for ${newMember.user.username}`);
+          const ageLogChannelId = await storage.getSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID);
+          if (ageLogChannelId) {
+            const logChannel = newMember.guild.channels.cache.get(ageLogChannelId);
+            if (logChannel instanceof TextChannel) {
+              const adminEmbed = new EmbedBuilder()
+                .setTitle('⚠️ Age Role Switch Detected')
+                .setDescription(`<@${newMember.id}> attempted to switch from a minor role to the adult role.`)
+                .addFields(
+                  { name: 'Minor Role', value: `<@&${originalMinorRole}>`, inline: true },
+                  { name: 'Attempted Role', value: `<@&${ageAdultRoleId}>`, inline: true },
+                  { name: 'Action Taken', value: 'Adult role removed automatically.', inline: false },
+                )
+                .setThumbnail(newMember.user.displayAvatarURL())
+                .setColor(0xd2a4bf)
+                .setTimestamp();
+              await logChannel.send({ embeds: [adminEmbed] });
+            }
+          }
+          const ageExposeChannelId = await storage.getSetting(SETTINGS_KEYS.AGE_EXPOSE_CHANNEL_ID);
+          if (ageExposeChannelId) {
+            const exposeChannel = newMember.guild.channels.cache.get(ageExposeChannelId);
+            if (exposeChannel instanceof TextChannel) {
+              const exposeEmbed = new EmbedBuilder()
+                .setTitle('🔞 Nice Try')
+                .setDescription(
+                  `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nThe role has been removed. Not today.`
+                )
+                .setThumbnail(newMember.user.displayAvatarURL())
+                .setColor(0xd2a4bf)
+                .setTimestamp();
+              await exposeChannel.send({ embeds: [exposeEmbed] });
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to revert age role for ${newMember.user.username}:`, err);
+        }
     });
 
     this.client.once('ready', async () => {
