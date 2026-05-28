@@ -125,7 +125,7 @@ export class DiscordBot {
             const exposeEmbed = new EmbedBuilder()
               .setTitle('👀 Caught in 4K')
               .setDescription(
-                `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> face rev channel. 💀 Freak. (Or create a ticket to change your gender role)`
+                `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
               )
               .setThumbnail(newMember.user.displayAvatarURL())
               .setColor(0xd2a4bf)
@@ -135,15 +135,18 @@ export class DiscordBot {
         }
       } catch (err) {
         console.error(`Failed to revert gender role for ${newMember.user.username}:`, err);
-           }
+      }
+
       // --- Age role protection (minors trying to access adult channel) ---
       const ageAdultRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
       const ageMinorRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS);
       if (!ageAdultRoleId || !ageMinorRoleIdsSetting) return;
       const ageMinorRoleIds = ageMinorRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
+
       const hadMinorRole = ageMinorRoleIds.some(id => oldMember.roles.cache.has(id));
       const nowHasAdultRole = newMember.roles.cache.has(ageAdultRoleId);
       const hadAdultRole = oldMember.roles.cache.has(ageAdultRoleId);
+
       if (hadMinorRole && nowHasAdultRole && !hadAdultRole) {
         // Check bypass role
         const ageBypassRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID);
@@ -157,10 +160,12 @@ export class DiscordBot {
             }
           } catch {}
         }
+
         const originalMinorRole = ageMinorRoleIds.find(id => oldMember.roles.cache.has(id))!;
         try {
           await newMember.roles.remove(ageAdultRoleId);
           console.log(`Reverted age role switch for ${newMember.user.username}`);
+
           const ageLogChannelId = await storage.getSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID);
           if (ageLogChannelId) {
             const logChannel = newMember.guild.channels.cache.get(ageLogChannelId);
@@ -179,6 +184,7 @@ export class DiscordBot {
               await logChannel.send({ embeds: [adminEmbed] });
             }
           }
+
           const ageExposeChannelId = await storage.getSetting(SETTINGS_KEYS.AGE_EXPOSE_CHANNEL_ID);
           if (ageExposeChannelId) {
             const exposeChannel = newMember.guild.channels.cache.get(ageExposeChannelId);
@@ -197,9 +203,10 @@ export class DiscordBot {
         } catch (err) {
           console.error(`Failed to revert age role for ${newMember.user.username}:`, err);
         }
+      }
     });
 
-    this.client.once('ready', async () => {
+    this.client.once('clientReady', async () => {
       console.log(`Logged in as ${this.client.user?.tag}!`);
       this.isReady = true;
       await this.registerCommands();
@@ -357,6 +364,17 @@ export class DiscordBot {
             .addRoleOption(opt => opt.setName('role2').setDescription('Second gender role to protect').setRequired(false))
             .addChannelOption(opt => opt.setName('log').setDescription('Private channel for admin alerts').setRequired(false))
             .addChannelOption(opt => opt.setName('expose').setDescription('Public channel to call them out').setRequired(false))
+            .addRoleOption(opt => opt.setName('bypass').setDescription('Role whose members can change gender roles without being flagged (e.g. Moderator)').setRequired(false))
+        )
+        .addSubcommand(sub =>
+          sub.setName('age')
+            .setDescription('Configure age role protection (prevents minors accessing adult channels)')
+            .addRoleOption(opt => opt.setName('minor1').setDescription('First minor role').setRequired(false))
+            .addRoleOption(opt => opt.setName('minor2').setDescription('Second minor role').setRequired(false))
+            .addRoleOption(opt => opt.setName('adult').setDescription('Adult role to protect').setRequired(false))
+            .addChannelOption(opt => opt.setName('log').setDescription('Private channel for admin alerts').setRequired(false))
+            .addChannelOption(opt => opt.setName('expose').setDescription('Public channel to call them out').setRequired(false))
+            .addRoleOption(opt => opt.setName('bypass').setDescription('Role whose members can change age roles without being flagged').setRequired(false))
         ),
       new SlashCommandBuilder()
         .setName('exclude')
@@ -534,16 +552,48 @@ export class DiscordBot {
           if (role2 && !current.includes(role2.id)) current.push(role2.id);
           await storage.updateSetting(SETTINGS_KEYS.GENDER_ROLE_IDS, current.join(','));
         }
+        const bypass = options.getRole('bypass');
         if (log) await storage.updateSetting(SETTINGS_KEYS.GENDER_LOG_CHANNEL_ID, log.id);
         if (expose) await storage.updateSetting(SETTINGS_KEYS.GENDER_EXPOSE_CHANNEL_ID, expose.id);
+        if (bypass) await storage.updateSetting(SETTINGS_KEYS.GENDER_BYPASS_ROLE_ID, bypass.id);
 
         const updatedIds = (await storage.getSetting(SETTINGS_KEYS.GENDER_ROLE_IDS) || '').split(',').filter(Boolean);
         const roleList = updatedIds.map(id => `<@&${id}>`).join(', ') || 'None';
         const logId = await storage.getSetting(SETTINGS_KEYS.GENDER_LOG_CHANNEL_ID);
         const exposeId = await storage.getSetting(SETTINGS_KEYS.GENDER_EXPOSE_CHANNEL_ID);
+        const bypassId = await storage.getSetting(SETTINGS_KEYS.GENDER_BYPASS_ROLE_ID);
 
         await interaction.reply({
-          content: `✅ Gender protection updated.\n**Protected roles:** ${roleList}\n**Admin log:** ${logId ? `<#${logId}>` : 'Not set'}\n**Public expose channel:** ${exposeId ? `<#${exposeId}>` : 'Not set'}`,
+          content: `✅ Gender protection updated.\n**Protected roles:** ${roleList}\n**Admin log:** ${logId ? `<#${logId}>` : 'Not set'}\n**Expose channel:** ${exposeId ? `<#${exposeId}>` : 'Not set'}\n**Bypass role:** ${bypassId ? `<@&${bypassId}>` : 'Not set'}`,
+          ephemeral: true,
+        });
+      } else if (sub === 'age') {
+        const minor1 = options.getRole('minor1');
+        const minor2 = options.getRole('minor2');
+        const adult = options.getRole('adult');
+        const log = options.getChannel('log');
+        const expose = options.getChannel('expose');
+        const bypass = options.getRole('bypass');
+
+        if (minor1 || minor2) {
+          const current = (await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS) || '').split(',').map(s => s.trim()).filter(Boolean);
+          if (minor1 && !current.includes(minor1.id)) current.push(minor1.id);
+          if (minor2 && !current.includes(minor2.id)) current.push(minor2.id);
+          await storage.updateSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS, current.join(','));
+        }
+        if (adult) await storage.updateSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID, adult.id);
+        if (log) await storage.updateSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID, log.id);
+        if (expose) await storage.updateSetting(SETTINGS_KEYS.AGE_EXPOSE_CHANNEL_ID, expose.id);
+        if (bypass) await storage.updateSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID, bypass.id);
+
+        const minorIds = (await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS) || '').split(',').filter(Boolean);
+        const adultId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
+        const logId = await storage.getSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID);
+        const exposeId = await storage.getSetting(SETTINGS_KEYS.AGE_EXPOSE_CHANNEL_ID);
+        const bypassId = await storage.getSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID);
+
+        await interaction.reply({
+          content: `✅ Age protection updated.\n**Minor roles:** ${minorIds.map(id => `<@&${id}>`).join(', ') || 'None'}\n**Adult role:** ${adultId ? `<@&${adultId}>` : 'Not set'}\n**Admin log:** ${logId ? `<#${logId}>` : 'Not set'}\n**Expose channel:** ${exposeId ? `<#${exposeId}>` : 'Not set'}\n**Bypass role:** ${bypassId ? `<@&${bypassId}>` : 'Not set'}`,
           ephemeral: true,
         });
       } else if (sub === 'points') {
