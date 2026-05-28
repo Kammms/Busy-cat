@@ -10,6 +10,7 @@ import {
   Routes, 
   PermissionFlagsBits,
   ChatInputCommandInteraction,
+  AuditLogEvent,
   Invite
 } from 'discord.js';
 import { storage } from './storage';
