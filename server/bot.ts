@@ -70,85 +70,89 @@ export class DiscordBot {
       }
 
       // --- Gender role switch detection ---
-      const genderRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.GENDER_ROLE_IDS);
-      if (!genderRoleIdsSetting) return;
-      const genderRoleIds = genderRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
-      if (genderRoleIds.length < 2) return;
+      await (async () => {
+        const genderRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.GENDER_ROLE_IDS);
+        if (!genderRoleIdsSetting) return;
+        const genderRoleIds = genderRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
+        if (genderRoleIds.length < 2) return;
 
-      const oldGenderRole = genderRoleIds.find(id => oldMember.roles.cache.has(id));
-      const newGenderRole = genderRoleIds.find(id => newMember.roles.cache.has(id));
+        const oldGenderRole = genderRoleIds.find(id => oldMember.roles.cache.has(id));
+        const newGenderRole = genderRoleIds.find(id => newMember.roles.cache.has(id));
 
-      // Only act if they had a gender role and switched to a different one
-      if (!oldGenderRole || !newGenderRole || oldGenderRole === newGenderRole) return;
+        if (!oldGenderRole || !newGenderRole || oldGenderRole === newGenderRole) return;
 
-      // Check if the change was made by someone with the bypass role (e.g. an admin)
-      const genderBypassRoleId = await storage.getSetting(SETTINGS_KEYS.GENDER_BYPASS_ROLE_ID);
-      if (genderBypassRoleId) {
+        const genderBypassRoleId = await storage.getSetting(SETTINGS_KEYS.GENDER_BYPASS_ROLE_ID);
+        if (genderBypassRoleId) {
+          try {
+            const logs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 5 });
+            const entry = logs.entries.find(e => (e.target as any)?.id === newMember.id);
+            if (entry?.executor) {
+              const executor = await newMember.guild.members.fetch(entry.executor.id).catch(() => null);
+              if (executor?.roles.cache.has(genderBypassRoleId)) return;
+            }
+          } catch {}
+        }
+
         try {
-          const logs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 5 });
-          const entry = logs.entries.find(e => (e.target as any)?.id === newMember.id);
-          if (entry?.executor) {
-            const executor = await newMember.guild.members.fetch(entry.executor.id).catch(() => null);
-            if (executor?.roles.cache.has(genderBypassRoleId)) return;
-          }
-        } catch {}
-      }
+          await newMember.roles.remove(newGenderRole);
+          await newMember.roles.add(oldGenderRole);
+          console.log(`Reverted gender role switch for ${newMember.user.username}`);
 
-      try {
-        await newMember.roles.remove(newGenderRole);
-        await newMember.roles.add(oldGenderRole);
-        console.log(`Reverted gender role switch for ${newMember.user.username}`);
-
-        const logChannelId = await storage.getSetting(SETTINGS_KEYS.GENDER_LOG_CHANNEL_ID);
-        if (logChannelId) {
-          const logChannel = newMember.guild.channels.cache.get(logChannelId);
-          if (logChannel instanceof TextChannel) {
-            const adminEmbed = new EmbedBuilder()
-              .setTitle('⚠️ Gender Role Switch Detected')
-              .setDescription(`<@${newMember.id}> attempted to switch their gender role.`)
-              .addFields(
-                { name: 'Original Role', value: `<@&${oldGenderRole}>`, inline: true },
-                { name: 'Attempted Role', value: `<@&${newGenderRole}>`, inline: true },
-                { name: 'Action Taken', value: 'Role reverted automatically.', inline: false },
-              )
-              .setThumbnail(newMember.user.displayAvatarURL())
-              .setColor(0xd2a4bf)
-              .setTimestamp();
-            await logChannel.send({ embeds: [adminEmbed] });
+          const logChannelId = await storage.getSetting(SETTINGS_KEYS.GENDER_LOG_CHANNEL_ID);
+          if (logChannelId) {
+            const logChannel = newMember.guild.channels.cache.get(logChannelId);
+            if (logChannel instanceof TextChannel) {
+              await logChannel.send({
+                embeds: [new EmbedBuilder()
+                  .setTitle('⚠️ Gender Role Switch Detected')
+                  .setDescription(`<@${newMember.id}> attempted to switch their gender role.`)
+                  .addFields(
+                    { name: 'Original Role', value: `<@&${oldGenderRole}>`, inline: true },
+                    { name: 'Attempted Role', value: `<@&${newGenderRole}>`, inline: true },
+                    { name: 'Action Taken', value: 'Role reverted automatically.', inline: false },
+                  )
+                  .setThumbnail(newMember.user.displayAvatarURL())
+                  .setColor(0xd2a4bf)
+                  .setTimestamp()],
+              });
+            }
           }
+
+          const exposeChannelId = await storage.getSetting(SETTINGS_KEYS.GENDER_EXPOSE_CHANNEL_ID);
+          if (exposeChannelId) {
+            const exposeChannel = newMember.guild.channels.cache.get(exposeChannelId);
+            if (exposeChannel instanceof TextChannel) {
+              await exposeChannel.send({
+                embeds: [new EmbedBuilder()
+                  .setTitle('👀 Caught in 4K')
+                  .setDescription(
+                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
+                  )
+                  .setThumbnail(newMember.user.displayAvatarURL())
+                  .setColor(0xd2a4bf)
+                  .setTimestamp()],
+              });
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to revert gender role for ${newMember.user.username}:`, err);
         }
+      })();
 
-        const exposeChannelId = await storage.getSetting(SETTINGS_KEYS.GENDER_EXPOSE_CHANNEL_ID);
-        if (exposeChannelId) {
-          const exposeChannel = newMember.guild.channels.cache.get(exposeChannelId);
-          if (exposeChannel instanceof TextChannel) {
-            const exposeEmbed = new EmbedBuilder()
-              .setTitle('👀 Caught in 4K')
-              .setDescription(
-                `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
-              )
-              .setThumbnail(newMember.user.displayAvatarURL())
-              .setColor(0xd2a4bf)
-              .setTimestamp();
-            await exposeChannel.send({ embeds: [exposeEmbed] });
-          }
-        }
-      } catch (err) {
-        console.error(`Failed to revert gender role for ${newMember.user.username}:`, err);
-      }
+      // --- Age role protection (minors trying to access adult channels) ---
+      await (async () => {
+        const ageAdultRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
+        const ageMinorRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS);
+        if (!ageAdultRoleId || !ageMinorRoleIdsSetting) return;
+        const ageMinorRoleIds = ageMinorRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
+        if (ageMinorRoleIds.length === 0) return;
 
-      // --- Age role protection (minors trying to access adult channel) ---
-      const ageAdultRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
-      const ageMinorRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS);
-      if (!ageAdultRoleId || !ageMinorRoleIdsSetting) return;
-      const ageMinorRoleIds = ageMinorRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
+        const hadMinorRole = ageMinorRoleIds.some(id => oldMember.roles.cache.has(id));
+        const nowHasAdultRole = newMember.roles.cache.has(ageAdultRoleId);
+        const hadAdultRole = oldMember.roles.cache.has(ageAdultRoleId);
 
-      const hadMinorRole = ageMinorRoleIds.some(id => oldMember.roles.cache.has(id));
-      const nowHasAdultRole = newMember.roles.cache.has(ageAdultRoleId);
-      const hadAdultRole = oldMember.roles.cache.has(ageAdultRoleId);
+        if (!hadMinorRole || !nowHasAdultRole || hadAdultRole) return;
 
-      if (hadMinorRole && nowHasAdultRole && !hadAdultRole) {
-        // Check bypass role
         const ageBypassRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID);
         if (ageBypassRoleId) {
           try {
@@ -170,18 +174,19 @@ export class DiscordBot {
           if (ageLogChannelId) {
             const logChannel = newMember.guild.channels.cache.get(ageLogChannelId);
             if (logChannel instanceof TextChannel) {
-              const adminEmbed = new EmbedBuilder()
-                .setTitle('⚠️ Age Role Switch Detected')
-                .setDescription(`<@${newMember.id}> attempted to switch from a minor role to the adult role.`)
-                .addFields(
-                  { name: 'Minor Role', value: `<@&${originalMinorRole}>`, inline: true },
-                  { name: 'Attempted Role', value: `<@&${ageAdultRoleId}>`, inline: true },
-                  { name: 'Action Taken', value: 'Adult role removed automatically.', inline: false },
-                )
-                .setThumbnail(newMember.user.displayAvatarURL())
-                .setColor(0xd2a4bf)
-                .setTimestamp();
-              await logChannel.send({ embeds: [adminEmbed] });
+              await logChannel.send({
+                embeds: [new EmbedBuilder()
+                  .setTitle('⚠️ Age Role Switch Detected')
+                  .setDescription(`<@${newMember.id}> attempted to switch from a minor role to the adult role.`)
+                  .addFields(
+                    { name: 'Minor Role', value: `<@&${originalMinorRole}>`, inline: true },
+                    { name: 'Attempted Role', value: `<@&${ageAdultRoleId}>`, inline: true },
+                    { name: 'Action Taken', value: 'Adult role removed automatically.', inline: false },
+                  )
+                  .setThumbnail(newMember.user.displayAvatarURL())
+                  .setColor(0xd2a4bf)
+                  .setTimestamp()],
+              });
             }
           }
 
@@ -189,21 +194,22 @@ export class DiscordBot {
           if (ageExposeChannelId) {
             const exposeChannel = newMember.guild.channels.cache.get(ageExposeChannelId);
             if (exposeChannel instanceof TextChannel) {
-              const exposeEmbed = new EmbedBuilder()
-                .setTitle('🔞 Nice Try')
-                .setDescription(
-                  `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nThe role has been removed. Not today.`
-                )
-                .setThumbnail(newMember.user.displayAvatarURL())
-                .setColor(0xd2a4bf)
-                .setTimestamp();
-              await exposeChannel.send({ embeds: [exposeEmbed] });
+              await exposeChannel.send({
+                embeds: [new EmbedBuilder()
+                  .setTitle('🔞 Nice Try')
+                  .setDescription(
+                    `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nThe role has been removed. Not today.`
+                  )
+                  .setThumbnail(newMember.user.displayAvatarURL())
+                  .setColor(0xd2a4bf)
+                  .setTimestamp()],
+              });
             }
           }
         } catch (err) {
           console.error(`Failed to revert age role for ${newMember.user.username}:`, err);
         }
-      }
+      })();
     });
 
     this.client.once('clientReady', async () => {
