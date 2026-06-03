@@ -126,7 +126,7 @@ export class DiscordBot {
                 embeds: [new EmbedBuilder()
                   .setTitle('👀 Caught in 4K')
                   .setDescription(
-                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
+                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀\n\nIf you want to change your gender role, create a ticket`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -198,7 +198,7 @@ export class DiscordBot {
                 embeds: [new EmbedBuilder()
                   .setTitle('🔞 Nice Try')
                   .setDescription(
-                    `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nThe role has been removed. Not today.`
+                    `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nIf you want to change your age role, create a ticket.`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
