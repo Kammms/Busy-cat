@@ -126,7 +126,7 @@ export class DiscordBot {
                 embeds: [new EmbedBuilder()
                   .setTitle('👀 Caught in 4K')
                   .setDescription(
-                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀\n\nIf you want to change your gender role, create a ticket`
+                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -168,6 +168,7 @@ export class DiscordBot {
         const originalMinorRole = ageMinorRoleIds.find(id => oldMember.roles.cache.has(id))!;
         try {
           await newMember.roles.remove(ageAdultRoleId);
+          await newMember.roles.add(originalMinorRole);
           console.log(`Reverted age role switch for ${newMember.user.username}`);
 
           const ageLogChannelId = await storage.getSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID);
@@ -198,7 +199,7 @@ export class DiscordBot {
                 embeds: [new EmbedBuilder()
                   .setTitle('🔞 Nice Try')
                   .setDescription(
-                    `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nIf you want to change your age role, create a ticket.`
+                    `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nThe role has been removed. Not today.`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -222,7 +223,19 @@ export class DiscordBot {
 
     this.client.on('interactionCreate', async (interaction) => {
       if (interaction.isChatInputCommand()) {
-        await this.handleInteraction(interaction);
+        try {
+          await this.handleInteraction(interaction);
+        } catch (err) {
+          console.error('Unhandled interaction error:', err);
+          try {
+            const msg = { content: '❌ Something went wrong.', ephemeral: true };
+            if (interaction.replied || interaction.deferred) {
+              await interaction.followUp(msg);
+            } else {
+              await interaction.reply(msg);
+            }
+          } catch {}
+        }
       }
     });
 
@@ -817,11 +830,12 @@ export class DiscordBot {
         await interaction.reply({ embeds: [embed], ephemeral: true });
       }
     } else if (commandName === 'stats') {
+      await interaction.deferReply();
       const user = options.getUser('user') || interaction.user;
       const mod = await storage.getModeratorByDiscordId(user.id);
 
       if (!mod) {
-        return interaction.reply({ content: `❌ No stats found for <@${user.id}>. Are they a tracked moderator?`, ephemeral: true });
+        return interaction.editReply({ content: `❌ No stats found for <@${user.id}>. Are they a tracked moderator?` });
       }
 
       const ptsPerMsg = parseInt(await storage.getSetting(SETTINGS_KEYS.POINTS_PER_MSG) || '15');
@@ -861,7 +875,7 @@ export class DiscordBot {
         )
         .setColor(0xd2a4bf);
 
-      await interaction.reply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [embed] });
     }
   }
 
