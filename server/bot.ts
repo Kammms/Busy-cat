@@ -46,6 +46,14 @@ export class DiscordBot {
 
   private setupListeners() {
     this.client.on('guildMemberUpdate', async (oldMember, newMember) => {
+      // Ensure we have full role data before any checks
+      if (oldMember.partial) {
+        try { await oldMember.fetch(); } catch { return; }
+      }
+      if (newMember.partial) {
+        try { await newMember.fetch(); } catch { return; }
+      }
+
       // --- Moderator role auto-tracking ---
       const modRoleId = await storage.getSetting(SETTINGS_KEYS.MODERATOR_ROLE_ID);
       if (modRoleId) {
@@ -126,7 +134,7 @@ export class DiscordBot {
                 embeds: [new EmbedBuilder()
                   .setTitle('👀 Caught in 4K')
                   .setDescription(
-                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
+                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀\n\nMake a ticket to change your age role.`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -139,7 +147,7 @@ export class DiscordBot {
         }
       })();
 
-      // --- Age role protection (minors trying to access adult channels) ---
+      // --- Age role protection ---
       await (async () => {
         const ageAdultRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
         const ageMinorRoleIdsSetting = await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS);
@@ -147,12 +155,19 @@ export class DiscordBot {
         const ageMinorRoleIds = ageMinorRoleIdsSetting.split(',').map(s => s.trim()).filter(Boolean);
         if (ageMinorRoleIds.length === 0) return;
 
-        const hadMinorRole = ageMinorRoleIds.some(id => oldMember.roles.cache.has(id));
-        const nowHasAdultRole = newMember.roles.cache.has(ageAdultRoleId);
+        const oldMinorRole = ageMinorRoleIds.find(id => oldMember.roles.cache.has(id));
+        const newMinorRole = ageMinorRoleIds.find(id => newMember.roles.cache.has(id));
         const hadAdultRole = oldMember.roles.cache.has(ageAdultRoleId);
+        const nowHasAdultRole = newMember.roles.cache.has(ageAdultRoleId);
 
-        if (!hadMinorRole || !nowHasAdultRole || hadAdultRole) return;
+        // Case 1: switched from a minor role to the adult role
+        const minorToAdult = !!oldMinorRole && nowHasAdultRole && !hadAdultRole;
+        // Case 2: switched from one minor role to a different minor role
+        const minorToMinor = !!oldMinorRole && !!newMinorRole && oldMinorRole !== newMinorRole;
 
+        if (!minorToAdult && !minorToMinor) return;
+
+        // Bypass check
         const ageBypassRoleId = await storage.getSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID);
         if (ageBypassRoleId) {
           try {
@@ -165,10 +180,11 @@ export class DiscordBot {
           } catch {}
         }
 
-        const originalMinorRole = ageMinorRoleIds.find(id => oldMember.roles.cache.has(id))!;
+        const attemptedRole = minorToAdult ? ageAdultRoleId : newMinorRole!;
+
         try {
-          await newMember.roles.remove(ageAdultRoleId);
-          await newMember.roles.add(originalMinorRole);
+          await newMember.roles.remove(attemptedRole);
+          await newMember.roles.add(oldMinorRole!);
           console.log(`Reverted age role switch for ${newMember.user.username}`);
 
           const ageLogChannelId = await storage.getSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID);
@@ -178,11 +194,15 @@ export class DiscordBot {
               await logChannel.send({
                 embeds: [new EmbedBuilder()
                   .setTitle('⚠️ Age Role Switch Detected')
-                  .setDescription(`<@${newMember.id}> attempted to switch from a minor role to the adult role.`)
+                  .setDescription(
+                    minorToAdult
+                      ? `<@${newMember.id}> attempted to switch from a minor role to the adult role.`
+                      : `<@${newMember.id}> attempted to switch between minor roles.`
+                  )
                   .addFields(
-                    { name: 'Minor Role', value: `<@&${originalMinorRole}>`, inline: true },
-                    { name: 'Attempted Role', value: `<@&${ageAdultRoleId}>`, inline: true },
-                    { name: 'Action Taken', value: 'Adult role removed automatically.', inline: false },
+                    { name: 'Original Role', value: `<@&${oldMinorRole}>`, inline: true },
+                    { name: 'Attempted Role', value: `<@&${attemptedRole}>`, inline: true },
+                    { name: 'Action Taken', value: 'Role reverted automatically.', inline: false },
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -197,9 +217,11 @@ export class DiscordBot {
             if (exposeChannel instanceof TextChannel) {
               await exposeChannel.send({
                 embeds: [new EmbedBuilder()
-                  .setTitle('🔞 Nice Try')
+                  .setTitle(minorToAdult ? '👀 Caught in 4K' : '👀 Caught in 4K')
                   .setDescription(
-                    `<@${newMember.id}> just tried to swap their <@&${originalMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nThe role has been removed. Not today.`
+                    minorToAdult
+                      ? `<@${newMember.id}> just tried to swap their <@&${oldMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nMake a ticket to change your age role.`
+                      : `<@${newMember.id}> just tried to switch from <@&${oldMinorRole}> to <@&${newMinorRole}> 👀\n\nMake a ticket to change your age role.`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
