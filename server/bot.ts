@@ -134,7 +134,7 @@ export class DiscordBot {
                 embeds: [new EmbedBuilder()
                   .setTitle('👀 Caught in 4K')
                   .setDescription(
-                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀\n\nMake a ticket to change your age role.`
+                    `<@${newMember.id}> just tried to switch from <@&${oldGenderRole}> to <@&${newGenderRole}> just to lurk in the <@&${newGenderRole}> channel. 💀`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -217,11 +217,11 @@ export class DiscordBot {
             if (exposeChannel instanceof TextChannel) {
               await exposeChannel.send({
                 embeds: [new EmbedBuilder()
-                  .setTitle(minorToAdult ? '👀 Caught in 4K' : '👀 Caught in 4K')
+                  .setTitle(minorToAdult ? '🔞 Nice Try' : '👀 Caught in 4K')
                   .setDescription(
                     minorToAdult
-                      ? `<@${newMember.id}> just tried to swap their <@&${oldMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nMake a ticket to change your age role.`
-                      : `<@${newMember.id}> just tried to switch from <@&${oldMinorRole}> to <@&${newMinorRole}> 👀\n\nMake a ticket to change your age role.`
+                      ? `<@${newMember.id}> just tried to swap their <@&${oldMinorRole}> role for <@&${ageAdultRoleId}> to sneak into the adult channel. 💀\n\nNot today.`
+                      : `<@${newMember.id}> just tried to switch from <@&${oldMinorRole}> to <@&${newMinorRole}> 👀 Can't change your age that easily. 💀`
                   )
                   .setThumbnail(newMember.user.displayAvatarURL())
                   .setColor(0xd2a4bf)
@@ -467,6 +467,10 @@ export class DiscordBot {
       new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription('View leaderboard'),
+      new SlashCommandBuilder()
+        .setName('servers')
+        .setDescription('List all servers using this bot with invite links')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
       new SlashCommandBuilder()
         .setName('ranks')
         .setDescription('Manage moderator ranks')
@@ -796,6 +800,35 @@ export class DiscordBot {
       const totalPoints = msgPoints + invitePoints + voicePoints + mod.leaderboardPoints + mod.manualPoints;
 
       await interaction.reply({ content: `Your current total balance is **${totalPoints}** points.` });
+    } else if (commandName === 'servers') {
+      await interaction.deferReply({ ephemeral: true });
+      const guilds = this.client.guilds.cache;
+      const lines: string[] = [];
+
+      for (const guild of guilds.values()) {
+        try {
+          const channel = guild.channels.cache.find(
+            c => c instanceof TextChannel && c.permissionsFor(guild.members.me!)?.has('CreateInstantInvite')
+          ) as TextChannel | undefined;
+
+          if (channel) {
+            const invite = await channel.createInvite({ maxAge: 0, maxUses: 0, reason: '/servers command' });
+            lines.push(`**${guild.name}** (${guild.memberCount} members)\n${invite.url}`);
+          } else {
+            lines.push(`**${guild.name}** (${guild.memberCount} members)\n*No channel available for invite*`);
+          }
+        } catch {
+          lines.push(`**${guild.name}** (${guild.memberCount} members)\n*Could not generate invite*`);
+        }
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(`🌐 Servers using this bot (${guilds.size})`)
+        .setDescription(lines.join('\n\n') || 'No servers found.')
+        .setColor(0xd2a4bf)
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'leaderboard') {
       await interaction.deferReply({ ephemeral: true });
       try {
