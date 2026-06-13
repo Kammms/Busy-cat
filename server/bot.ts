@@ -9,6 +9,7 @@ import {
   REST, 
   Routes, 
   PermissionFlagsBits,
+  MessageFlags,
   ChatInputCommandInteraction,
   AuditLogEvent,
   Invite
@@ -250,7 +251,7 @@ export class DiscordBot {
         } catch (err) {
           console.error('Unhandled interaction error:', err);
           try {
-            const msg = { content: '❌ Something went wrong.', ephemeral: true };
+            const msg = { content: '❌ Something went wrong.', flags: MessageFlags.Ephemeral };
             if (interaction.replied || interaction.deferred) {
               await interaction.followUp(msg);
             } else {
@@ -586,11 +587,11 @@ export class DiscordBot {
       if (sub === 'team') {
         const role = options.getRole('role', true);
         await storage.updateSetting(SETTINGS_KEYS.MODERATOR_ROLE_ID, role.id);
-        await interaction.reply({ content: `✅ Moderator team role set to <@&${role.id}>`, ephemeral: true });
+        await interaction.reply({ content: `✅ Moderator team role set to <@&${role.id}>`, flags: MessageFlags.Ephemeral });
       } else if (sub === 'track') {
         const channel = options.getChannel('channel', true);
         await storage.updateSetting(SETTINGS_KEYS.TRACKED_CHANNEL_ID, channel.id);
-        await interaction.reply({ content: `✅ Tracking channel set to <#${channel.id}>`, ephemeral: true });
+        await interaction.reply({ content: `✅ Tracking channel set to <#${channel.id}>`, flags: MessageFlags.Ephemeral });
       } else if (sub === 'gender') {
         const role1 = options.getRole('role1');
         const role2 = options.getRole('role2');
@@ -617,7 +618,7 @@ export class DiscordBot {
 
         await interaction.reply({
           content: `✅ Gender protection updated.\n**Protected roles:** ${roleList}\n**Admin log:** ${logId ? `<#${logId}>` : 'Not set'}\n**Expose channel:** ${exposeId ? `<#${exposeId}>` : 'Not set'}\n**Bypass role:** ${bypassId ? `<@&${bypassId}>` : 'Not set'}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } else if (sub === 'age') {
         const minor1 = options.getRole('minor1');
@@ -646,7 +647,7 @@ export class DiscordBot {
 
         await interaction.reply({
           content: `✅ Age protection updated.\n**Minor roles:** ${minorIds.map(id => `<@&${id}>`).join(', ') || 'None'}\n**Adult role:** ${adultId ? `<@&${adultId}>` : 'Not set'}\n**Admin log:** ${logId ? `<#${logId}>` : 'Not set'}\n**Expose channel:** ${exposeId ? `<#${exposeId}>` : 'Not set'}\n**Bypass role:** ${bypassId ? `<@&${bypassId}>` : 'Not set'}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } else if (sub === 'points') {
         const points = options.getInteger('points');
@@ -669,7 +670,7 @@ export class DiscordBot {
           await storage.updateSetting(SETTINGS_KEYS.LEADERBOARD_REWARDS, currentRewards.join(','));
         }
         
-        await interaction.reply({ content: `✅ Point values updated.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Point values updated.`, flags: MessageFlags.Ephemeral });
       }
     } else if (commandName === 'exclude') {
       const user = options.getUser('user', true);
@@ -687,16 +688,16 @@ export class DiscordBot {
         await storage.updateModerator(moderator.id, { isIgnored: true });
       }
       
-      await interaction.reply({ content: `✅ <@${user.id}> has been excluded from tracking.`, ephemeral: true });
+      await interaction.reply({ content: `✅ <@${user.id}> has been excluded from tracking.`, flags: MessageFlags.Ephemeral });
     } else if (commandName === 'include') {
       const user = options.getUser('user', true);
       let moderator = await storage.getModeratorByDiscordId(user.id);
       
       if (moderator) {
         await storage.updateModerator(moderator.id, { isIgnored: false });
-        await interaction.reply({ content: `✅ <@${user.id}> has been included back in tracking.`, ephemeral: true });
+        await interaction.reply({ content: `✅ <@${user.id}> has been included back in tracking.`, flags: MessageFlags.Ephemeral });
       } else {
-        await interaction.reply({ content: `❌ <@${user.id}> is not in the system. They will be added automatically when they send a message in the tracked channel.`, ephemeral: true });
+        await interaction.reply({ content: `❌ <@${user.id}> is not in the system. They will be added automatically when they send a message in the tracked channel.`, flags: MessageFlags.Ephemeral });
       }
     } else if (commandName === 'addpoints') {
       const user = options.getUser('user', true);
@@ -736,7 +737,7 @@ export class DiscordBot {
       
       let mod = await storage.getModeratorByDiscordId(user.id);
       if (!mod) {
-        return interaction.reply({ content: "❌ This user is not a tracked moderator.", ephemeral: true });
+        return interaction.reply({ content: "❌ This user is not a tracked moderator.", flags: MessageFlags.Ephemeral });
       }
       
       await storage.updateModerator(mod.id, { manualPoints: mod.manualPoints - amount });
@@ -759,15 +760,15 @@ export class DiscordBot {
       }
 
       if (type === 'messages') {
-        if (amount === null) return interaction.reply({ content: '❌ Please provide an `amount` for this type.', ephemeral: true });
+        if (amount === null) return interaction.reply({ content: '❌ Please provide an `amount` for this type.', flags: MessageFlags.Ephemeral });
         await storage.updateModerator(mod.id, { messageCount: Math.max(0, mod.messageCount + amount) });
         await interaction.reply({ content: `✅ Adjusted message count for <@${user.id}> by **${amount}**.` });
       } else if (type === 'invites') {
-        if (amount === null) return interaction.reply({ content: '❌ Please provide an `amount` for this type.', ephemeral: true });
+        if (amount === null) return interaction.reply({ content: '❌ Please provide an `amount` for this type.', flags: MessageFlags.Ephemeral });
         await storage.updateModerator(mod.id, { inviteCount: Math.max(0, mod.inviteCount + amount) });
         await interaction.reply({ content: `✅ Adjusted invite count for <@${user.id}> by **${amount}**.` });
       } else if (type === 'voicehours') {
-        if (amount === null) return interaction.reply({ content: '❌ Please provide an `amount` for this type.', ephemeral: true });
+        if (amount === null) return interaction.reply({ content: '❌ Please provide an `amount` for this type.', flags: MessageFlags.Ephemeral });
         const minutesToAdd = amount * 60;
         await storage.updateModerator(mod.id, { voiceMinutes: Math.max(0, (mod.voiceMinutes || 0) + minutesToAdd) });
         await interaction.reply({ content: `✅ Adjusted voice hours for <@${user.id}> by **${amount}** hour(s).` });
@@ -785,7 +786,7 @@ export class DiscordBot {
           pointsToAdd = amount;
           label = `${amount} pts`;
         } else {
-          return interaction.reply({ content: '❌ Please provide either a `rank` or an `amount` for leaderboard points.', ephemeral: true });
+          return interaction.reply({ content: '❌ Please provide either a `rank` or an `amount` for leaderboard points.', flags: MessageFlags.Ephemeral });
         }
 
         await storage.updateModerator(mod.id, { leaderboardPoints: Math.max(0, mod.leaderboardPoints + pointsToAdd) });
@@ -794,7 +795,7 @@ export class DiscordBot {
     } else if (commandName === 'balance') {
       const mod = await storage.getModeratorByDiscordId(interaction.user.id);
       if (!mod) {
-        return interaction.reply({ content: "❌ You are not a tracked moderator.", ephemeral: true });
+        return interaction.reply({ content: "❌ You are not a tracked moderator.", flags: MessageFlags.Ephemeral });
       }
 
       const ptsPerMsg = parseInt(await storage.getSetting(SETTINGS_KEYS.POINTS_PER_MSG) || '15');
@@ -808,7 +809,7 @@ export class DiscordBot {
 
       await interaction.reply({ content: `Your current total balance is **${totalPoints}** points.` });
     } else if (commandName === 'inrole') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const role1 = options.getRole('role1', true);
         const role2 = options.getRole('role2');
@@ -836,38 +837,38 @@ export class DiscordBot {
           return;
         }
 
-        const lines = [...matching.values()]
+        const allLines = [...matching.values()]
           .sort((a, b) => a.user.username.localeCompare(b.user.username))
-          .map(m => `<@${m.id}> (${m.user.username})`);
+          .map(m => `<@${m.id}>`);
 
-        const chunks: string[] = [];
-        let current = '';
-        for (const line of lines) {
-          const next = current ? current + '\n' + line : line;
-          if (next.length > 3900) {
-            chunks.push(current);
-            current = line;
-          } else {
-            current = next;
-          }
+        // Build description staying well under Discord's 6000 total embed limit
+        const LIMIT = 3500;
+        let description = '';
+        let shown = 0;
+        for (const line of allLines) {
+          const next = description ? description + '\n' + line : line;
+          if (next.length > LIMIT) break;
+          description = next;
+          shown++;
         }
-        if (current) chunks.push(current);
+        const remaining = matching.size - shown;
+        if (remaining > 0) {
+          const suffix = `\n*... and ${remaining} more*`;
+          description = description.slice(0, LIMIT - suffix.length) + suffix;
+        }
 
-        // Discord allows max 10 embeds per message
-        const trimmed = chunks.slice(0, 10);
-        const embeds = trimmed.map((chunk, i) => {
-          const embed = new EmbedBuilder().setDescription(chunk).setColor(0xd2a4bf);
-          if (i === 0) embed.setTitle(`👥 Members with ${roleLabels} (${matching.size})`);
-          return embed;
-        });
+        const embed = new EmbedBuilder()
+          .setTitle(`👥 Members with ${roleLabels} (${matching.size})`)
+          .setDescription(description)
+          .setColor(0xd2a4bf);
 
-        await interaction.editReply({ embeds });
+        await interaction.editReply({ embeds: [embed] });
       } catch (err) {
         console.error('Error in /inrole:', err);
         await interaction.editReply({ content: '❌ Failed to fetch members. Make sure the bot has the right permissions.' });
       }
     } else if (commandName === 'servers') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const guilds = this.client.guilds.cache;
       const lines: string[] = [];
 
@@ -896,7 +897,7 @@ export class DiscordBot {
 
       await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'leaderboard') {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         if (interaction.channel instanceof TextChannel) {
           await this.generateLeaderboard(interaction.channel);
@@ -914,7 +915,7 @@ export class DiscordBot {
         const name = options.getString('name', true);
         const points = options.getInteger('points', true);
         const rank = await storage.createModRank({ name, requiredPoints: points });
-        await interaction.reply({ content: `✅ Rank **${name}** added with ID **${rank.id}** (Requires **${points}** points).`, ephemeral: true });
+        await interaction.reply({ content: `✅ Rank **${name}** added with ID **${rank.id}** (Requires **${points}** points).`, flags: MessageFlags.Ephemeral });
       } else if (sub === 'modify') {
         const id = options.getInteger('id', true);
         const name = options.getString('name');
@@ -922,25 +923,25 @@ export class DiscordBot {
         
         const existing = await storage.getModRanks();
         const rank = existing.find(r => r.id === id);
-        if (!rank) return interaction.reply({ content: `❌ Rank with ID **${id}** not found. Use \`/ranks list\` to see valid IDs.`, ephemeral: true });
+        if (!rank) return interaction.reply({ content: `❌ Rank with ID **${id}** not found. Use \`/ranks list\` to see valid IDs.`, flags: MessageFlags.Ephemeral });
         
         const updates: any = {};
         if (name) updates.name = name;
         if (points !== null) updates.requiredPoints = points;
         
         await storage.updateModRank(id, updates);
-        await interaction.reply({ content: `✅ Rank **${id}** updated.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Rank **${id}** updated.`, flags: MessageFlags.Ephemeral });
       } else if (sub === 'remove') {
         const id = options.getInteger('id', true);
         const existing = await storage.getModRanks();
         const rank = existing.find(r => r.id === id);
-        if (!rank) return interaction.reply({ content: `❌ Rank with ID **${id}** not found.`, ephemeral: true });
+        if (!rank) return interaction.reply({ content: `❌ Rank with ID **${id}** not found.`, flags: MessageFlags.Ephemeral });
         
         await storage.deleteModRank(id);
-        await interaction.reply({ content: `✅ Rank **${id}** (**${rank.name}**) removed.`, ephemeral: true });
+        await interaction.reply({ content: `✅ Rank **${id}** (**${rank.name}**) removed.`, flags: MessageFlags.Ephemeral });
       } else if (sub === 'list') {
         const ranks = await storage.getModRanks();
-        if (ranks.length === 0) return interaction.reply({ content: "No ranks configured. Use \`/ranks add\` to create one.", ephemeral: true });
+        if (ranks.length === 0) return interaction.reply({ content: "No ranks configured. Use \`/ranks add\` to create one.", flags: MessageFlags.Ephemeral });
         
         const embed = new EmbedBuilder()
           .setTitle("🎖 Configured Moderator Ranks")
@@ -948,7 +949,7 @@ export class DiscordBot {
           .setDescription(ranks.map(r => `ID: \`${r.id}\` | **${r.name}** | Points: \`${r.requiredPoints}\``).join('\n'))
           .setFooter({ text: "Use these IDs with modify/remove commands" });
           
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
     } else if (commandName === 'stats') {
       await interaction.deferReply();
