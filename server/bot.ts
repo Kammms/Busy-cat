@@ -484,6 +484,16 @@ export class DiscordBot {
         .addRoleOption(opt => opt.setName('role2').setDescription('Second role (optional)').setRequired(false))
         .addRoleOption(opt => opt.setName('role3').setDescription('Third role (optional)').setRequired(false)),
       new SlashCommandBuilder()
+        .setName('search')
+        .setDescription('Find members with certain roles who mentioned/replied to a user')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(opt => opt.setName('user').setDescription('The user who was mentioned or replied to').setRequired(true))
+        .addChannelOption(opt => opt.setName('channel').setDescription('Channel to search through').setRequired(true))
+        .addRoleOption(opt => opt.setName('role1').setDescription('First role the sender must have').setRequired(true))
+        .addRoleOption(opt => opt.setName('role2').setDescription('Second role the sender must also have (optional)').setRequired(false))
+        .addChannelOption(opt => opt.setName('send_to').setDescription('Channel to send results to (defaults to current channel)').setRequired(false))
+        .addIntegerOption(opt => opt.setName('limit').setDescription('How many messages to scan (default 500, max 1000)').setMinValue(100).setMaxValue(1000).setRequired(false)),
+      new SlashCommandBuilder()
         .setName('ranks')
         .setDescription('Manage moderator ranks')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -907,6 +917,132 @@ export class DiscordBot {
       } catch (err) {
         console.error('Error in /inrole:', err);
         await interaction.editReply({ content: '❌ Failed to fetch members. Make sure the bot has the right permissions.' });
+      }
+    } else if (commandName === 'search') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const targetUser = options.getUser('user', true);
+        const searchChannel = options.getChannel('channel', true);
+        const role1 = options.getRole('role1', true);
+        const role2 = options.getRole('role2');
+        const sendToChannel = options.getChannel('send_to');
+        const scanLimit = options.getInteger('limit') ?? 500;
+
+        if (!(searchChannel instanceof TextChannel)) {
+          await interaction.editReply({ content: '❌ The search channel must be a text channel.' });
+          return;
+        }
+
+        const outputChannel = (sendToChannel instanceof TextChannel ? sendToChannel : interaction.channel) as TextChannel;
+
+        // Fetch all members so role cache is populated
+        await interaction.guild!.members.fetch().catch(() => {});
+
+        await interaction.editReply({ content: `🔍 Scanning up to **${scanLimit}** messages in <#${searchChannel.id}>...` });
+
+        // Fetch messages in batches of 100
+        const requiredRoleIds = [role1.id, role2?.id].filter(Boolean) as string[];
+        const matchingSenders = new Map<string, { member: any; messageLink: string; count: number }>();
+
+        let lastId: string | undefined;
+        let scanned = 0;
+
+        while (scanned < scanLimit) {
+          const batch = await searchChannel.messages.fetch({ limit: 100, ...(lastId ? { before: lastId } : {}) });
+          if (batch.size === 0) break;
+
+          for (const msg of batch.values()) {
+            if (msg.author.bot) continue;
+
+            // Check if this message mentions or replies to the target user
+            const mentionsTarget = msg.mentions.users.has(targetUser.id);
+            const repliesToTarget = msg.reference?.messageId
+              ? (await searchChannel.messages.fetch(msg.reference.messageId).catch(() => null))?.author?.id === targetUser.id
+              : false;
+
+            if (!mentionsTarget && !repliesToTarget) continue;
+
+            // Check sender has required roles
+            const sender = interaction.guild!.members.cache.get(msg.author.id);
+            if (!sender) continue;
+            if (!requiredRoleIds.every(id => sender.roles.cache.has(id))) continue;
+
+            const messageLink = `https://discord.com/channels/${interaction.guildId}/${searchChannel.id}/${msg.id}`;
+            if (matchingSenders.has(msg.author.id)) {
+              matchingSenders.get(msg.author.id)!.count++;
+            } else {
+              matchingSenders.set(msg.author.id, { member: sender, messageLink, count: 1 });
+            }
+          }
+
+          lastId = batch.last()?.id;
+          scanned += batch.size;
+          if (batch.size < 100) break;
+        }
+
+        const roleLabels = requiredRoleIds.map(id => `<@&${id}>`).join(' + ');
+
+        if (matchingSenders.size === 0) {
+          await interaction.editReply({ content: `✅ Done. No members with ${roleLabels} mentioned or replied to <@${targetUser.id}> in the last **${scanned}** messages.` });
+          return;
+        }
+
+        // Build paginated results
+        const allLines = [...matchingSenders.values()]
+          .sort((a, b) => b.count - a.count)
+          .map(({ member, messageLink, count }) =>
+            `<@${member.id}> (${member.user.username}) — **${count}** time${count !== 1 ? 's' : ''} — [example](${messageLink})`
+          );
+
+        const PAGE_SIZE = 15;
+        const pages: string[] = [];
+        for (let i = 0; i < allLines.length; i += PAGE_SIZE) {
+          pages.push(allLines.slice(i, i + PAGE_SIZE).join('\n'));
+        }
+
+        const buildEmbed = (page: number) => new EmbedBuilder()
+          .setTitle(`🔎 Who mentioned/replied to ${targetUser.username} (${matchingSenders.size} found)`)
+          .setDescription(pages[page])
+          .setFooter({ text: `Roles: ${requiredRoleIds.map(id => `@${interaction.guild!.roles.cache.get(id)?.name ?? id}`).join(' + ')} • Scanned ${scanned} messages • Page ${page + 1}/${pages.length}` })
+          .setColor(0xd2a4bf);
+
+        const buildRow = (page: number) => new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            new ButtonBuilder().setCustomId('search_prev').setLabel('◀ Previous').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+            new ButtonBuilder().setCustomId('search_next').setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page === pages.length - 1),
+          );
+
+        const sent = await outputChannel.send({
+          embeds: [buildEmbed(0)],
+          components: pages.length > 1 ? [buildRow(0)] : [],
+        });
+
+        await interaction.editReply({ content: `✅ Results sent to <#${outputChannel.id}>.` });
+
+        if (pages.length <= 1) return;
+
+        let currentPage = 0;
+        const collector = sent.createMessageComponentCollector({ componentType: ComponentType.Button, time: 5 * 60 * 1000 });
+
+        collector.on('collect', async (btn) => {
+          if (btn.customId === 'search_prev') currentPage = Math.max(0, currentPage - 1);
+          if (btn.customId === 'search_next') currentPage = Math.min(pages.length - 1, currentPage + 1);
+          await btn.update({ embeds: [buildEmbed(currentPage)], components: [buildRow(currentPage)] });
+        });
+
+        collector.on('end', async () => {
+          try {
+            const disabledRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder().setCustomId('search_prev').setLabel('◀ Previous').setStyle(ButtonStyle.Secondary).setDisabled(true),
+              new ButtonBuilder().setCustomId('search_next').setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(true),
+            );
+            await sent.edit({ components: [disabledRow] });
+          } catch {}
+        });
+
+      } catch (err) {
+        console.error('Error in /search:', err);
+        await interaction.editReply({ content: '❌ Something went wrong during the search.' });
       }
     } else if (commandName === 'servers') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
