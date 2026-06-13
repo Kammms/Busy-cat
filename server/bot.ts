@@ -815,7 +815,17 @@ export class DiscordBot {
         const role3 = options.getRole('role3');
         const requiredRoleIds = [role1.id, role2?.id, role3?.id].filter(Boolean) as string[];
 
-        await interaction.guild!.members.fetch();
+        // Fetch all members to ensure cache is populated
+        try {
+          await interaction.guild!.members.fetch();
+        } catch (fetchErr) {
+          console.error('members.fetch() failed (Server Members Intent may not be enabled):', fetchErr);
+          await interaction.editReply({
+            content: '❌ Could not fetch members. Make sure the **Server Members Intent** is enabled in the Discord Developer Portal under your bot → Bot → Privileged Gateway Intents.',
+          });
+          return;
+        }
+
         const matching = interaction.guild!.members.cache.filter(m =>
           requiredRoleIds.every(id => m.roles.cache.has(id))
         );
