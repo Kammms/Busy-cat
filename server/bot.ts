@@ -809,47 +809,53 @@ export class DiscordBot {
       await interaction.reply({ content: `Your current total balance is **${totalPoints}** points.` });
     } else if (commandName === 'inrole') {
       await interaction.deferReply({ ephemeral: true });
-      const role1 = options.getRole('role1', true);
-      const role2 = options.getRole('role2');
-      const role3 = options.getRole('role3');
-      const requiredRoleIds = [role1.id, role2?.id, role3?.id].filter(Boolean) as string[];
+      try {
+        const role1 = options.getRole('role1', true);
+        const role2 = options.getRole('role2');
+        const role3 = options.getRole('role3');
+        const requiredRoleIds = [role1.id, role2?.id, role3?.id].filter(Boolean) as string[];
 
-      await interaction.guild!.members.fetch();
-      const matching = interaction.guild!.members.cache.filter(m =>
-        requiredRoleIds.every(id => m.roles.cache.has(id))
-      );
+        await interaction.guild!.members.fetch();
+        const matching = interaction.guild!.members.cache.filter(m =>
+          requiredRoleIds.every(id => m.roles.cache.has(id))
+        );
 
-      const roleLabels = requiredRoleIds.map(id => `<@&${id}>`).join(' + ');
-      if (matching.size === 0) {
-        await interaction.editReply({ content: `No members found with all of: ${roleLabels}` });
-        return;
-      }
-
-      const memberList = [...matching.values()]
-        .sort((a, b) => a.user.username.localeCompare(b.user.username))
-        .map(m => `<@${m.id}> (${m.user.username})`)
-        .join('\n');
-
-      const chunks: string[] = [];
-      const lines = memberList.split('\n');
-      let current = '';
-      for (const line of lines) {
-        if ((current + '\n' + line).length > 3900) {
-          chunks.push(current);
-          current = line;
-        } else {
-          current = current ? current + '\n' + line : line;
+        const roleLabels = requiredRoleIds.map(id => `<@&${id}>`).join(' + ');
+        if (matching.size === 0) {
+          await interaction.editReply({ content: `No members found with all of: ${roleLabels}` });
+          return;
         }
+
+        const lines = [...matching.values()]
+          .sort((a, b) => a.user.username.localeCompare(b.user.username))
+          .map(m => `<@${m.id}> (${m.user.username})`);
+
+        const chunks: string[] = [];
+        let current = '';
+        for (const line of lines) {
+          const next = current ? current + '\n' + line : line;
+          if (next.length > 3900) {
+            chunks.push(current);
+            current = line;
+          } else {
+            current = next;
+          }
+        }
+        if (current) chunks.push(current);
+
+        // Discord allows max 10 embeds per message
+        const trimmed = chunks.slice(0, 10);
+        const embeds = trimmed.map((chunk, i) => {
+          const embed = new EmbedBuilder().setDescription(chunk).setColor(0xd2a4bf);
+          if (i === 0) embed.setTitle(`👥 Members with ${roleLabels} (${matching.size})`);
+          return embed;
+        });
+
+        await interaction.editReply({ embeds });
+      } catch (err) {
+        console.error('Error in /inrole:', err);
+        await interaction.editReply({ content: '❌ Failed to fetch members. Make sure the bot has the right permissions.' });
       }
-      if (current) chunks.push(current);
-
-      const embeds = chunks.map((chunk, i) => new EmbedBuilder()
-        .setTitle(i === 0 ? `👥 Members with ${roleLabels} (${matching.size})` : null as any)
-        .setDescription(chunk)
-        .setColor(0xd2a4bf)
-      );
-
-      await interaction.editReply({ embeds });
     } else if (commandName === 'servers') {
       await interaction.deferReply({ ephemeral: true });
       const guilds = this.client.guilds.cache;
