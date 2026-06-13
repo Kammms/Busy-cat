@@ -6,6 +6,10 @@ import {
   EmbedBuilder, 
   TextChannel, 
   SlashCommandBuilder, 
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
   REST, 
   Routes, 
   PermissionFlagsBits,
@@ -816,7 +820,6 @@ export class DiscordBot {
         const role3 = options.getRole('role3');
         const requiredRoleIds = [role1.id, role2?.id, role3?.id].filter(Boolean) as string[];
 
-        // Fetch all members to ensure cache is populated
         try {
           await interaction.guild!.members.fetch();
         } catch (fetchErr) {
@@ -839,30 +842,68 @@ export class DiscordBot {
 
         const allLines = [...matching.values()]
           .sort((a, b) => a.user.username.localeCompare(b.user.username))
-          .map(m => `<@${m.id}>`);
+          .map(m => `<@${m.id}> (${m.user.username})`);
 
-        // Build description staying well under Discord's 6000 total embed limit
-        const LIMIT = 3500;
-        let description = '';
-        let shown = 0;
-        for (const line of allLines) {
-          const next = description ? description + '\n' + line : line;
-          if (next.length > LIMIT) break;
-          description = next;
-          shown++;
-        }
-        const remaining = matching.size - shown;
-        if (remaining > 0) {
-          const suffix = `\n*... and ${remaining} more*`;
-          description = description.slice(0, LIMIT - suffix.length) + suffix;
+        const PAGE_SIZE = 20;
+        const pages: string[] = [];
+        for (let i = 0; i < allLines.length; i += PAGE_SIZE) {
+          pages.push(allLines.slice(i, i + PAGE_SIZE).join('\n'));
         }
 
-        const embed = new EmbedBuilder()
+        const buildEmbed = (page: number) => new EmbedBuilder()
           .setTitle(`👥 Members with ${roleLabels} (${matching.size})`)
-          .setDescription(description)
+          .setDescription(pages[page])
+          .setFooter({ text: `Page ${page + 1} of ${pages.length}` })
           .setColor(0xd2a4bf);
 
-        await interaction.editReply({ embeds: [embed] });
+        const buildRow = (page: number) => new ActionRowBuilder<ButtonBuilder>()
+          .addComponents(
+            new ButtonBuilder()
+              .setCustomId('inrole_prev')
+              .setLabel('◀ Previous')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(page === 0),
+            new ButtonBuilder()
+              .setCustomId('inrole_next')
+              .setLabel('Next ▶')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(page === pages.length - 1),
+          );
+
+        const response = await interaction.editReply({
+          embeds: [buildEmbed(0)],
+          components: pages.length > 1 ? [buildRow(0)] : [],
+        });
+
+        if (pages.length <= 1) return;
+
+        let currentPage = 0;
+        const collector = response.createMessageComponentCollector({
+          componentType: ComponentType.Button,
+          time: 5 * 60 * 1000,
+        });
+
+        collector.on('collect', async (btn) => {
+          if (btn.user.id !== interaction.user.id) {
+            await btn.reply({ content: "These buttons aren't for you.", flags: MessageFlags.Ephemeral });
+            return;
+          }
+          if (btn.customId === 'inrole_prev') currentPage = Math.max(0, currentPage - 1);
+          if (btn.customId === 'inrole_next') currentPage = Math.min(pages.length - 1, currentPage + 1);
+          await btn.update({ embeds: [buildEmbed(currentPage)], components: [buildRow(currentPage)] });
+        });
+
+        collector.on('end', async () => {
+          try {
+            const disabledRow = new ActionRowBuilder<ButtonBuilder>()
+              .addComponents(
+                new ButtonBuilder().setCustomId('inrole_prev').setLabel('◀ Previous').setStyle(ButtonStyle.Secondary).setDisabled(true),
+                new ButtonBuilder().setCustomId('inrole_next').setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(true),
+              );
+            await interaction.editReply({ components: [disabledRow] });
+          } catch {}
+        });
+
       } catch (err) {
         console.error('Error in /inrole:', err);
         await interaction.editReply({ content: '❌ Failed to fetch members. Make sure the bot has the right permissions.' });
