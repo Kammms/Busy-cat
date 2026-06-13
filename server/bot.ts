@@ -472,6 +472,13 @@ export class DiscordBot {
         .setDescription('List all servers using this bot with invite links')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
       new SlashCommandBuilder()
+        .setName('inrole')
+        .setDescription('List members that have all of the specified roles')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addRoleOption(opt => opt.setName('role1').setDescription('First role').setRequired(true))
+        .addRoleOption(opt => opt.setName('role2').setDescription('Second role (optional)').setRequired(false))
+        .addRoleOption(opt => opt.setName('role3').setDescription('Third role (optional)').setRequired(false)),
+      new SlashCommandBuilder()
         .setName('ranks')
         .setDescription('Manage moderator ranks')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -800,6 +807,49 @@ export class DiscordBot {
       const totalPoints = msgPoints + invitePoints + voicePoints + mod.leaderboardPoints + mod.manualPoints;
 
       await interaction.reply({ content: `Your current total balance is **${totalPoints}** points.` });
+    } else if (commandName === 'inrole') {
+      await interaction.deferReply({ ephemeral: true });
+      const role1 = options.getRole('role1', true);
+      const role2 = options.getRole('role2');
+      const role3 = options.getRole('role3');
+      const requiredRoleIds = [role1.id, role2?.id, role3?.id].filter(Boolean) as string[];
+
+      await interaction.guild!.members.fetch();
+      const matching = interaction.guild!.members.cache.filter(m =>
+        requiredRoleIds.every(id => m.roles.cache.has(id))
+      );
+
+      const roleLabels = requiredRoleIds.map(id => `<@&${id}>`).join(' + ');
+      if (matching.size === 0) {
+        await interaction.editReply({ content: `No members found with all of: ${roleLabels}` });
+        return;
+      }
+
+      const memberList = [...matching.values()]
+        .sort((a, b) => a.user.username.localeCompare(b.user.username))
+        .map(m => `<@${m.id}> (${m.user.username})`)
+        .join('\n');
+
+      const chunks: string[] = [];
+      const lines = memberList.split('\n');
+      let current = '';
+      for (const line of lines) {
+        if ((current + '\n' + line).length > 3900) {
+          chunks.push(current);
+          current = line;
+        } else {
+          current = current ? current + '\n' + line : line;
+        }
+      }
+      if (current) chunks.push(current);
+
+      const embeds = chunks.map((chunk, i) => new EmbedBuilder()
+        .setTitle(i === 0 ? `👥 Members with ${roleLabels} (${matching.size})` : null as any)
+        .setDescription(chunk)
+        .setColor(0xd2a4bf)
+      );
+
+      await interaction.editReply({ embeds });
     } else if (commandName === 'servers') {
       await interaction.deferReply({ ephemeral: true });
       const guilds = this.client.guilds.cache;
