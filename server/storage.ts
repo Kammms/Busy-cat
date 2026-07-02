@@ -1,12 +1,14 @@
 import { 
-  moderators, botSettings, modRanks,
+  moderators, botSettings, modRanks, shopTransactions, shopRoles,
   type Moderator, type InsertModerator, 
   type BotSetting, type InsertBotSetting,
   type ModRank, type InsertModRank,
+  type ShopTransaction, type InsertShopTransaction,
+  type ShopRole, type InsertShopRole,
   SETTINGS_KEYS
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, desc, lt, and } from "drizzle-orm";
 
 export interface IStorage {
   // Moderators
@@ -26,6 +28,13 @@ export interface IStorage {
   createModRank(rank: InsertModRank): Promise<ModRank>;
   updateModRank(id: number, updates: Partial<ModRank>): Promise<ModRank>;
   deleteModRank(id: number): Promise<void>;
+
+  // Shop
+  createShopTransaction(tx: InsertShopTransaction): Promise<ShopTransaction>;
+  getShopTransactions(guildId: string, limit?: number): Promise<ShopTransaction[]>;
+  createShopRole(role: InsertShopRole): Promise<ShopRole>;
+  getExpiredShopRoles(): Promise<ShopRole[]>;
+  markShopRoleExpired(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -98,6 +107,36 @@ export class DatabaseStorage implements IStorage {
 
   async deleteModRank(id: number): Promise<void> {
     await db.delete(modRanks).where(eq(modRanks.id, id));
+  }
+
+  async createShopTransaction(tx: InsertShopTransaction): Promise<ShopTransaction> {
+    const [transaction] = await db.insert(shopTransactions).values(tx).returning();
+    return transaction;
+  }
+
+  async getShopTransactions(guildId: string, limit = 50): Promise<ShopTransaction[]> {
+    return await db
+      .select()
+      .from(shopTransactions)
+      .where(eq(shopTransactions.guildId, guildId))
+      .orderBy(desc(shopTransactions.purchasedAt))
+      .limit(limit);
+  }
+
+  async createShopRole(role: InsertShopRole): Promise<ShopRole> {
+    const [shopRole] = await db.insert(shopRoles).values(role).returning();
+    return shopRole;
+  }
+
+  async getExpiredShopRoles(): Promise<ShopRole[]> {
+    return await db
+      .select()
+      .from(shopRoles)
+      .where(and(eq(shopRoles.expired, false), lt(shopRoles.expiresAt, new Date())));
+  }
+
+  async markShopRoleExpired(id: number): Promise<void> {
+    await db.update(shopRoles).set({ expired: true }).where(eq(shopRoles.id, id));
   }
 }
 
