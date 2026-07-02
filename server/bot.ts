@@ -25,27 +25,29 @@ import { SETTINGS_KEYS } from '@shared/schema';
 
 // ── Shop ────────────────────────────────────────────────────────────────────
 const SHOP_ITEMS = [
-  { id: 'custom_role',   label: '🎨 Custom Role',           desc: 'A custom coloured role for 1 week' },
-  { id: 'role_icon',     label: '🖼️ Role Icon',             desc: 'Add an icon to your custom role' },
-  { id: 'role_name',     label: '✏️ Change Role Name',      desc: 'Rename your custom role' },
-  { id: 'role_share',    label: '🤝 Share Role',            desc: 'Let someone else also have your role' },
-  { id: 'autoreact',     label: '⚡ Autoreact',             desc: 'Bot reacts to your messages automatically' },
-  { id: 'autoreply',     label: '💬 Autoreply',             desc: 'Bot replies to your messages automatically' },
-  { id: 'mute_member',   label: '🔇 Mute a Member (5 min)', desc: 'Temporarily mute someone for 5 minutes' },
-  { id: 'rename_member', label: '📝 Rename a Member',       desc: 'Change someone\'s server nickname' },
+  { id: 'custom_role',        label: '🎨 Custom Role',              desc: 'A custom coloured role for 1 week',      durationDays: 7  },
+  { id: 'role_icon',          label: '🖼️ Role Icon',                desc: 'Add an icon to your custom role',        durationDays: 7  },
+  { id: 'role_name',          label: '✏️ Change Role Name',         desc: 'Rename your custom role',               durationDays: 7  },
+  { id: 'role_share',         label: '🤝 Share Role',               desc: 'Let someone else also have your role',  durationDays: 7  },
+  { id: 'booster_role_share', label: '✨ Share a Booster Role',     desc: 'Share a booster role for 1 month',       durationDays: 30 },
+  { id: 'autoreact',          label: '⚡ Autoreact',                desc: 'Bot reacts to your messages',            durationDays: 7  },
+  { id: 'autoreply',          label: '💬 Autoreply',                desc: 'Bot replies to your messages',           durationDays: 7  },
+  { id: 'mute_member',        label: '🔇 Mute a Member (5 min)',    desc: 'Temporarily mute someone for 5 minutes', durationDays: 7  },
+  { id: 'rename_member',      label: '📝 Rename a Member',          desc: 'Change someone\'s server nickname',      durationDays: 7  },
 ] as const;
 
 type ShopItemId = (typeof SHOP_ITEMS)[number]['id'];
 
 const DEFAULT_PRICES: Record<ShopItemId, { msg: number; vc: number }> = {
-  custom_role:   { msg: 2000, vc: 6  },
-  role_icon:     { msg: 500,  vc: 1  },
-  role_name:     { msg: 500,  vc: 1  },
-  role_share:    { msg: 1000, vc: 2  },
-  autoreact:     { msg: 2000, vc: 5  },
-  autoreply:     { msg: 3000, vc: 6  },
-  mute_member:   { msg: 5000, vc: 15 },
-  rename_member: { msg: 5000, vc: 15 },
+  custom_role:        { msg: 2000, vc: 6  },
+  role_icon:          { msg: 500,  vc: 1  },
+  role_name:          { msg: 500,  vc: 1  },
+  role_share:         { msg: 1000, vc: 2  },
+  booster_role_share: { msg: 1500, vc: 5  },
+  autoreact:          { msg: 2000, vc: 5  },
+  autoreply:          { msg: 3000, vc: 6  },
+  mute_member:        { msg: 5000, vc: 15 },
+  rename_member:      { msg: 5000, vc: 15 },
 };
 
 async function getShopPrices(): Promise<Record<ShopItemId, { msg: number; vc: number }>> {
@@ -506,14 +508,15 @@ export class DiscordBot {
             .addStringOption(opt => opt.setName('item').setDescription('Which item to price')
               .setRequired(true)
               .addChoices(
-                { name: '🎨 Custom Role',           value: 'custom_role'   },
-                { name: '🖼️ Role Icon',             value: 'role_icon'     },
-                { name: '✏️ Change Role Name',      value: 'role_name'     },
-                { name: '🤝 Share Role',            value: 'role_share'    },
-                { name: '⚡ Autoreact',             value: 'autoreact'     },
-                { name: '💬 Autoreply',             value: 'autoreply'     },
-                { name: '🔇 Mute a Member (5 min)', value: 'mute_member'   },
-                { name: '📝 Rename a Member',       value: 'rename_member' },
+                { name: '🎨 Custom Role',           value: 'custom_role'        },
+                { name: '🖼️ Role Icon',             value: 'role_icon'          },
+                { name: '✏️ Change Role Name',      value: 'role_name'          },
+                { name: '🤝 Share Role',            value: 'role_share'         },
+                { name: '✨ Share a Booster Role',  value: 'booster_role_share' },
+                { name: '⚡ Autoreact',             value: 'autoreact'          },
+                { name: '💬 Autoreply',             value: 'autoreply'          },
+                { name: '🔇 Mute a Member (5 min)', value: 'mute_member'        },
+                { name: '📝 Rename a Member',       value: 'rename_member'      },
               ))
             .addIntegerOption(opt => opt.setName('messages').setDescription('Weekly message cost').setRequired(false).setMinValue(0))
             .addIntegerOption(opt => opt.setName('vc_hours').setDescription('Weekly VC hours cost').setRequired(false).setMinValue(0))
@@ -1119,7 +1122,8 @@ export class DiscordBot {
 
           const itemLines = selectedIds.map(id => {
             const item = SHOP_ITEMS.find(i => i.id === id)!;
-            return `• ${item.label} — ${prices[id].msg.toLocaleString()} msgs / ${prices[id].vc}h VC`;
+            const dur = item.durationDays === 30 ? '1 month' : '1 week';
+            return `• ${item.label} *(${dur})* — ${prices[id].msg.toLocaleString()} msgs / ${prices[id].vc}h VC`;
           }).join('\n');
 
           const confirmEmbed = new EmbedBuilder()
@@ -1156,7 +1160,11 @@ export class DiscordBot {
 
             // ── Confirm: execute purchase ──────────────────────────────────
             const guildId = interaction.guildId!;
-            const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+            const maxDurationDays = selectedIds.reduce((max, id) => {
+              const days = SHOP_ITEMS.find(i => i.id === id)?.durationDays ?? 7;
+              return Math.max(max, days);
+            }, 7);
+            const expiresAt = new Date(Date.now() + maxDurationDays * 24 * 60 * 60 * 1000);
             let createdRoleId: string | undefined;
 
             // Create custom role if purchased
