@@ -28,6 +28,29 @@ export const modRanks = pgTable("mod_ranks", {
   requiredPoints: integer("required_points").notNull(),
 });
 
+export const shopTransactions = pgTable("shop_transactions", {
+  id: serial("id").primaryKey(),
+  guildId: text("guild_id").notNull(),
+  buyerDiscordId: text("buyer_discord_id").notNull(),
+  buyerUsername: text("buyer_username").notNull(),
+  items: text("items").array().notNull(),
+  totalMsgCost: integer("total_msg_cost").notNull().default(0),
+  totalVcHoursCost: integer("total_vc_hours_cost").notNull().default(0),
+  purchasedAt: timestamp("purchased_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  roleId: text("role_id"),
+});
+
+export const shopRoles = pgTable("shop_roles", {
+  id: serial("id").primaryKey(),
+  transactionId: integer("transaction_id").notNull(),
+  guildId: text("guild_id").notNull(),
+  roleId: text("role_id").notNull(),
+  buyerDiscordId: text("buyer_discord_id").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  expired: boolean("expired").notNull().default(false),
+});
+
 // Schemas
 export const insertModeratorSchema = createInsertSchema(moderators).omit({ 
   id: true, 
@@ -39,6 +62,8 @@ export const insertModeratorSchema = createInsertSchema(moderators).omit({
 
 export const insertSettingSchema = createInsertSchema(botSettings).omit({ id: true });
 export const insertModRankSchema = createInsertSchema(modRanks).omit({ id: true });
+export const insertShopTransactionSchema = createInsertSchema(shopTransactions).omit({ id: true, purchasedAt: true });
+export const insertShopRoleSchema = createInsertSchema(shopRoles).omit({ id: true });
 
 // Types
 export type Moderator = typeof moderators.$inferSelect;
@@ -47,6 +72,10 @@ export type BotSetting = typeof botSettings.$inferSelect;
 export type InsertBotSetting = z.infer<typeof insertSettingSchema>;
 export type ModRank = typeof modRanks.$inferSelect;
 export type InsertModRank = z.infer<typeof insertModRankSchema>;
+export type ShopTransaction = typeof shopTransactions.$inferSelect;
+export type InsertShopTransaction = z.infer<typeof insertShopTransactionSchema>;
+export type ShopRole = typeof shopRoles.$inferSelect;
+export type InsertShopRole = z.infer<typeof insertShopRoleSchema>;
 
 export type UpdateManualPointsRequest = {
   points: number;
@@ -71,4 +100,8 @@ export const SETTINGS_KEYS = {
   AGE_LOG_CHANNEL_ID: 'age_log_channel_id',
   AGE_EXPOSE_CHANNEL_ID: 'age_expose_channel_id',
   AGE_BYPASS_ROLE_ID: 'age_bypass_role_id',
+  SHOP_ALLOWED_ROLE_ID: 'shop_allowed_role_id',
+  SHOP_CHANNEL_ID: 'shop_channel_id',
+  SHOP_ABOVE_ROLE_ID: 'shop_above_role_id',
+  SHOP_PRICES: 'shop_prices',
 } as const;
