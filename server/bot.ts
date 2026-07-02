@@ -1059,6 +1059,7 @@ export class DiscordBot {
       }
     } else if (commandName === 'shop') {
       const sub = options.getSubcommand();
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       // Permission check — allowed role or Administrator
       const shopAllowedRoleId = await storage.getSetting(SETTINGS_KEYS.SHOP_ALLOWED_ROLE_ID);
@@ -1067,12 +1068,11 @@ export class DiscordBot {
       const isAdmin = member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
       const hasShopRole = shopAllowedRoleId ? (member?.roles.cache.has(shopAllowedRoleId) ?? false) : false;
       if (!isAdmin && !hasShopRole) {
-        await interaction.reply({ content: '❌ You don\'t have permission to use shop commands.', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: '❌ You don\'t have permission to use shop commands.' });
         return;
       }
 
       if (sub === 'buy') {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const buyer = options.getUser('buyer', true);
         const aboveRoleOpt = options.getRole('above_role');
 
