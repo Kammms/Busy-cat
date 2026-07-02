@@ -30,6 +30,29 @@ export async function runMigrations() {
         "name" text NOT NULL,
         "required_points" integer NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS "shop_transactions" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "guild_id" text NOT NULL,
+        "buyer_discord_id" text NOT NULL,
+        "buyer_username" text NOT NULL,
+        "items" text[] NOT NULL,
+        "total_msg_cost" integer DEFAULT 0 NOT NULL,
+        "total_vc_hours_cost" integer DEFAULT 0 NOT NULL,
+        "purchased_at" timestamp DEFAULT now() NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "role_id" text
+      );
+
+      CREATE TABLE IF NOT EXISTS "shop_roles" (
+        "id" serial PRIMARY KEY NOT NULL,
+        "transaction_id" integer NOT NULL,
+        "guild_id" text NOT NULL,
+        "role_id" text NOT NULL,
+        "buyer_discord_id" text NOT NULL,
+        "expires_at" timestamp NOT NULL,
+        "expired" boolean DEFAULT false NOT NULL
+      );
     `);
     console.log("Database schema ready.");
   } catch (err) {
