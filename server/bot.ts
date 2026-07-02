@@ -9,6 +9,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
   ComponentType,
   REST, 
   Routes, 
@@ -20,6 +22,42 @@ import {
 } from 'discord.js';
 import { storage } from './storage';
 import { SETTINGS_KEYS } from '@shared/schema';
+
+// ── Shop ────────────────────────────────────────────────────────────────────
+const SHOP_ITEMS = [
+  { id: 'custom_role',   label: '🎨 Custom Role',           desc: 'A custom coloured role for 1 week' },
+  { id: 'role_icon',     label: '🖼️ Role Icon',             desc: 'Add an icon to your custom role' },
+  { id: 'role_name',     label: '✏️ Change Role Name',      desc: 'Rename your custom role' },
+  { id: 'role_share',    label: '🤝 Share Role',            desc: 'Let someone else also have your role' },
+  { id: 'autoreact',     label: '⚡ Autoreact',             desc: 'Bot reacts to your messages automatically' },
+  { id: 'autoreply',     label: '💬 Autoreply',             desc: 'Bot replies to your messages automatically' },
+  { id: 'mute_member',   label: '🔇 Mute a Member (5 min)', desc: 'Temporarily mute someone for 5 minutes' },
+  { id: 'rename_member', label: '📝 Rename a Member',       desc: 'Change someone\'s server nickname' },
+] as const;
+
+type ShopItemId = (typeof SHOP_ITEMS)[number]['id'];
+
+const DEFAULT_PRICES: Record<ShopItemId, { msg: number; vc: number }> = {
+  custom_role:   { msg: 2000, vc: 6  },
+  role_icon:     { msg: 500,  vc: 1  },
+  role_name:     { msg: 500,  vc: 1  },
+  role_share:    { msg: 1000, vc: 2  },
+  autoreact:     { msg: 2000, vc: 5  },
+  autoreply:     { msg: 3000, vc: 6  },
+  mute_member:   { msg: 5000, vc: 15 },
+  rename_member: { msg: 5000, vc: 15 },
+};
+
+async function getShopPrices(): Promise<Record<ShopItemId, { msg: number; vc: number }>> {
+  const raw = await storage.getSetting(SETTINGS_KEYS.SHOP_PRICES);
+  if (!raw) return { ...DEFAULT_PRICES };
+  try {
+    return { ...DEFAULT_PRICES, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_PRICES };
+  }
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 // Minimal Invite interface for caching
 interface CachedInvite {
@@ -246,6 +284,39 @@ export class DiscordBot {
       await this.registerCommands();
       await this.refreshInviteCache();
       await this.recoverMissedMessages();
+
+      // ── Shop role expiry checker (runs every 5 minutes) ─────────────────
+      const checkExpiredRoles = async () => {
+        try {
+          const expired = await storage.getExpiredShopRoles();
+          for (const sr of expired) {
+            const guild = this.client.guilds.cache.get(sr.guildId);
+            if (!guild) { await storage.markShopRoleExpired(sr.id); continue; }
+            const role = guild.roles.cache.get(sr.roleId) ?? await guild.roles.fetch(sr.roleId).catch(() => null);
+            if (role) {
+              try {
+                // Remove all members from this role
+                const membersWithRole = guild.members.cache.filter(m => m.roles.cache.has(role.id));
+                for (const m of membersWithRole.values()) {
+                  await m.roles.remove(role).catch(() => {});
+                }
+                // Reset role to grey, no icon, no name suffix
+                await role.edit({ color: 0x808080, unicodeEmoji: null, reason: 'Shop role expired (1 week)' }).catch(() => {});
+              } catch (e) {
+                console.error(`Failed to expire shop role ${role.id}:`, e);
+              }
+            }
+            await storage.markShopRoleExpired(sr.id);
+            console.log(`Expired shop role ${sr.roleId} for buyer ${sr.buyerDiscordId}`);
+          }
+        } catch (e) {
+          console.error('Shop expiry check failed:', e);
+        }
+      };
+
+      setInterval(checkExpiredRoles, 5 * 60 * 1000);
+      checkExpiredRoles(); // run once on startup too
+      // ────────────────────────────────────────────────────────────────────
     });
 
     this.client.on('interactionCreate', async (interaction) => {
@@ -421,6 +492,31 @@ export class DiscordBot {
             .addChannelOption(opt => opt.setName('log').setDescription('Private channel for admin alerts').setRequired(false))
             .addChannelOption(opt => opt.setName('expose').setDescription('Public channel to call them out').setRequired(false))
             .addRoleOption(opt => opt.setName('bypass').setDescription('Role whose members can change age roles without being flagged').setRequired(false))
+        )
+        .addSubcommand(sub =>
+          sub.setName('shop')
+            .setDescription('Configure the shop system')
+            .addRoleOption(opt => opt.setName('allowed_role').setDescription('Role whose members can run /shop buy').setRequired(false))
+            .addChannelOption(opt => opt.setName('channel').setDescription('Channel where receipts are posted').setRequired(false))
+            .addRoleOption(opt => opt.setName('above_role').setDescription('New custom roles are placed just above this role').setRequired(false))
+        )
+        .addSubcommand(sub =>
+          sub.setName('shop-price')
+            .setDescription('Set the price of a shop item')
+            .addStringOption(opt => opt.setName('item').setDescription('Which item to price')
+              .setRequired(true)
+              .addChoices(
+                { name: '🎨 Custom Role',           value: 'custom_role'   },
+                { name: '🖼️ Role Icon',             value: 'role_icon'     },
+                { name: '✏️ Change Role Name',      value: 'role_name'     },
+                { name: '🤝 Share Role',            value: 'role_share'    },
+                { name: '⚡ Autoreact',             value: 'autoreact'     },
+                { name: '💬 Autoreply',             value: 'autoreply'     },
+                { name: '🔇 Mute a Member (5 min)', value: 'mute_member'   },
+                { name: '📝 Rename a Member',       value: 'rename_member' },
+              ))
+            .addIntegerOption(opt => opt.setName('messages').setDescription('Weekly message cost').setRequired(false).setMinValue(0))
+            .addIntegerOption(opt => opt.setName('vc_hours').setDescription('Weekly VC hours cost').setRequired(false).setMinValue(0))
         ),
       new SlashCommandBuilder()
         .setName('exclude')
@@ -483,6 +579,19 @@ export class DiscordBot {
         .addRoleOption(opt => opt.setName('role1').setDescription('First role').setRequired(true))
         .addRoleOption(opt => opt.setName('role2').setDescription('Second role (optional)').setRequired(false))
         .addRoleOption(opt => opt.setName('role3').setDescription('Third role (optional)').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('shop')
+        .setDescription('Shop management')
+        .addSubcommand(sub =>
+          sub.setName('buy')
+            .setDescription('Record a purchase for a member')
+            .addUserOption(opt => opt.setName('buyer').setDescription('Who is buying').setRequired(true))
+            .addRoleOption(opt => opt.setName('above_role').setDescription('Place new custom role above this role (overrides server default)').setRequired(false))
+        )
+        .addSubcommand(sub =>
+          sub.setName('stats')
+            .setDescription('View shop statistics and transaction history')
+        ),
       new SlashCommandBuilder()
         .setName('search')
         .setDescription('Find members with certain roles who mentioned/replied to a user')
@@ -685,6 +794,33 @@ export class DiscordBot {
         }
         
         await interaction.reply({ content: `✅ Point values updated.`, flags: MessageFlags.Ephemeral });
+      } else if (sub === 'shop') {
+        const allowedRole = options.getRole('allowed_role');
+        const channel = options.getChannel('channel');
+        const aboveRole = options.getRole('above_role');
+        if (allowedRole) await storage.updateSetting(SETTINGS_KEYS.SHOP_ALLOWED_ROLE_ID, allowedRole.id);
+        if (channel) await storage.updateSetting(SETTINGS_KEYS.SHOP_CHANNEL_ID, channel.id);
+        if (aboveRole) await storage.updateSetting(SETTINGS_KEYS.SHOP_ABOVE_ROLE_ID, aboveRole.id);
+        const aRoleId = await storage.getSetting(SETTINGS_KEYS.SHOP_ALLOWED_ROLE_ID);
+        const chId = await storage.getSetting(SETTINGS_KEYS.SHOP_CHANNEL_ID);
+        const abvId = await storage.getSetting(SETTINGS_KEYS.SHOP_ABOVE_ROLE_ID);
+        await interaction.reply({
+          content: `✅ Shop configured.\n**Allowed role:** ${aRoleId ? `<@&${aRoleId}>` : 'Not set'}\n**Receipt channel:** ${chId ? `<#${chId}>` : 'Not set'}\n**Place roles above:** ${abvId ? `<@&${abvId}>` : 'Not set'}`,
+          flags: MessageFlags.Ephemeral,
+        });
+      } else if (sub === 'shop-price') {
+        const itemId = options.getString('item', true) as ShopItemId;
+        const msgs = options.getInteger('messages');
+        const vcHours = options.getInteger('vc_hours');
+        const prices = await getShopPrices();
+        if (msgs !== null) prices[itemId].msg = msgs;
+        if (vcHours !== null) prices[itemId].vc = vcHours;
+        await storage.updateSetting(SETTINGS_KEYS.SHOP_PRICES, JSON.stringify(prices));
+        const item = SHOP_ITEMS.find(i => i.id === itemId)!;
+        await interaction.reply({
+          content: `✅ **${item.label}** price updated: **${prices[itemId].msg.toLocaleString()} messages** or **${prices[itemId].vc}h VC**`,
+          flags: MessageFlags.Ephemeral,
+        });
       }
     } else if (commandName === 'exclude') {
       const user = options.getUser('user', true);
@@ -917,6 +1053,248 @@ export class DiscordBot {
       } catch (err) {
         console.error('Error in /inrole:', err);
         await interaction.editReply({ content: '❌ Failed to fetch members. Make sure the bot has the right permissions.' });
+      }
+    } else if (commandName === 'shop') {
+      const sub = options.getSubcommand();
+
+      // Permission check — allowed role or Administrator
+      const shopAllowedRoleId = await storage.getSetting(SETTINGS_KEYS.SHOP_ALLOWED_ROLE_ID);
+      const member = interaction.guild!.members.cache.get(interaction.user.id)
+        ?? await interaction.guild!.members.fetch(interaction.user.id).catch(() => null);
+      const isAdmin = member?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
+      const hasShopRole = shopAllowedRoleId ? (member?.roles.cache.has(shopAllowedRoleId) ?? false) : false;
+      if (!isAdmin && !hasShopRole) {
+        await interaction.reply({ content: '❌ You don\'t have permission to use shop commands.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      if (sub === 'buy') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const buyer = options.getUser('buyer', true);
+        const aboveRoleOpt = options.getRole('above_role');
+
+        const prices = await getShopPrices();
+
+        // Build select menu with prices shown
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId(`shop_items_${interaction.user.id}`)
+          .setPlaceholder('Select one or more items…')
+          .setMinValues(1)
+          .setMaxValues(SHOP_ITEMS.length)
+          .addOptions(SHOP_ITEMS.map(item =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(item.label)
+              .setValue(item.id)
+              .setDescription(`${prices[item.id].msg.toLocaleString()} msgs or ${prices[item.id].vc}h VC`)
+          ));
+
+        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+
+        const response = await interaction.editReply({
+          content: `🛒 Select items for **${buyer.username}**:`,
+          components: [row],
+        });
+
+        const collector = response.createMessageComponentCollector({
+          componentType: ComponentType.StringSelect,
+          time: 5 * 60 * 1000,
+          max: 1,
+        });
+
+        collector.on('collect', async (sel) => {
+          if (sel.user.id !== interaction.user.id) {
+            await sel.reply({ content: "This isn't for you.", flags: MessageFlags.Ephemeral });
+            return;
+          }
+
+          await sel.deferUpdate();
+
+          const selectedIds = sel.values as ShopItemId[];
+          let totalMsg = 0;
+          let totalVc = 0;
+          for (const id of selectedIds) {
+            totalMsg += prices[id].msg;
+            totalVc += prices[id].vc;
+          }
+
+          const itemLines = selectedIds.map(id => {
+            const item = SHOP_ITEMS.find(i => i.id === id)!;
+            return `• ${item.label} — ${prices[id].msg.toLocaleString()} msgs / ${prices[id].vc}h VC`;
+          }).join('\n');
+
+          const confirmEmbed = new EmbedBuilder()
+            .setTitle('🛒 Confirm Purchase')
+            .setDescription(`**Buyer:** <@${buyer.id}>\n\n**Items:**\n${itemLines}\n\n**Total:** ${totalMsg.toLocaleString()} messages or ${totalVc}h of VC`)
+            .setColor(0xd2a4bf)
+            .setFooter({ text: 'Funds are assumed to be sufficient.' });
+
+          const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('shop_confirm').setLabel('✅ Confirm').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('shop_cancel').setLabel('❌ Cancel').setStyle(ButtonStyle.Secondary),
+          );
+
+          await interaction.editReply({ content: '', embeds: [confirmEmbed], components: [confirmRow] });
+
+          const btnCollector = response.createMessageComponentCollector({
+            componentType: ComponentType.Button,
+            time: 2 * 60 * 1000,
+            max: 1,
+          });
+
+          btnCollector.on('collect', async (btn) => {
+            if (btn.user.id !== interaction.user.id) {
+              await btn.reply({ content: "This isn't for you.", flags: MessageFlags.Ephemeral });
+              return;
+            }
+
+            await btn.deferUpdate();
+
+            if (btn.customId === 'shop_cancel') {
+              await interaction.editReply({ content: '❌ Purchase cancelled.', embeds: [], components: [] });
+              return;
+            }
+
+            // ── Confirm: execute purchase ──────────────────────────────────
+            const guildId = interaction.guildId!;
+            const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+            let createdRoleId: string | undefined;
+
+            // Create custom role if purchased
+            if (selectedIds.includes('custom_role')) {
+              try {
+                const aboveRoleId = aboveRoleOpt?.id ?? await storage.getSetting(SETTINGS_KEYS.SHOP_ABOVE_ROLE_ID);
+                const aboveRole = aboveRoleId ? interaction.guild!.roles.cache.get(aboveRoleId) : undefined;
+                const newRole = await interaction.guild!.roles.create({
+                  name: `${buyer.username} - shop`,
+                  color: 0x808080,
+                  position: aboveRole ? aboveRole.position + 1 : undefined,
+                  reason: `/shop buy by ${interaction.user.username}`,
+                });
+                createdRoleId = newRole.id;
+                // Give buyer the role
+                const buyerMember = await interaction.guild!.members.fetch(buyer.id).catch(() => null);
+                if (buyerMember) await buyerMember.roles.add(newRole).catch(() => {});
+              } catch (roleErr) {
+                console.error('Failed to create shop role:', roleErr);
+              }
+            }
+
+            // Save transaction
+            const tx = await storage.createShopTransaction({
+              guildId,
+              buyerDiscordId: buyer.id,
+              buyerUsername: buyer.username,
+              items: selectedIds,
+              totalMsgCost: totalMsg,
+              totalVcHoursCost: totalVc,
+              expiresAt,
+              roleId: createdRoleId ?? null,
+            });
+
+            // Save role for expiry tracking
+            if (createdRoleId) {
+              await storage.createShopRole({
+                transactionId: tx.id,
+                guildId,
+                roleId: createdRoleId,
+                buyerDiscordId: buyer.id,
+                expiresAt,
+                expired: false,
+              });
+            }
+
+            // Send receipt to shop channel
+            const shopChannelId = await storage.getSetting(SETTINGS_KEYS.SHOP_CHANNEL_ID);
+            const shopChannel = shopChannelId
+              ? (interaction.guild!.channels.cache.get(shopChannelId) as TextChannel | undefined)
+              : (interaction.channel as TextChannel);
+
+            const itemNameList = selectedIds.map(id => SHOP_ITEMS.find(i => i.id === id)!.label).join(', ');
+            const receiptEmbed = new EmbedBuilder()
+              .setTitle('🧾 Shop Receipt')
+              .setDescription(
+                `<@${buyer.id}> bought **${itemNameList}** for ` +
+                `**${totalMsg.toLocaleString()} messages** or **${totalVc}h of VC**` +
+                (createdRoleId ? `\n\n🎨 Role created: <@&${createdRoleId}>` : '')
+              )
+              .addFields({ name: 'Expires', value: `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>`, inline: true })
+              .setColor(0xd2a4bf)
+              .setTimestamp();
+
+            if (shopChannel) await shopChannel.send({ embeds: [receiptEmbed] }).catch(() => {});
+
+            await interaction.editReply({
+              content: `✅ Purchase recorded! Receipt sent${shopChannel ? ` to <#${shopChannel.id}>` : ''}.`,
+              embeds: [],
+              components: [],
+            });
+          });
+
+          btnCollector.on('end', async (collected) => {
+            if (collected.size === 0) {
+              await interaction.editReply({ content: '⏱️ Timed out.', embeds: [], components: [] }).catch(() => {});
+            }
+          });
+        });
+
+        collector.on('end', async (collected) => {
+          if (collected.size === 0) {
+            await interaction.editReply({ content: '⏱️ Timed out — no items selected.', components: [] }).catch(() => {});
+          }
+        });
+
+      } else if (sub === 'stats') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const guildId = interaction.guildId!;
+        const txs = await storage.getShopTransactions(guildId, 100);
+
+        if (txs.length === 0) {
+          await interaction.editReply({ content: '📊 No transactions recorded yet.' });
+          return;
+        }
+
+        // Sales by item
+        const salesByItem: Record<string, number> = {};
+        const buyerCounts: Record<string, { username: string; count: number }> = {};
+
+        for (const tx of txs) {
+          for (const item of tx.items) {
+            salesByItem[item] = (salesByItem[item] ?? 0) + 1;
+          }
+          if (buyerCounts[tx.buyerDiscordId]) {
+            buyerCounts[tx.buyerDiscordId].count++;
+          } else {
+            buyerCounts[tx.buyerDiscordId] = { username: tx.buyerUsername, count: 1 };
+          }
+        }
+
+        const itemSalesLines = SHOP_ITEMS
+          .map(i => `${i.label}: **${salesByItem[i.id] ?? 0}**`)
+          .join('\n');
+
+        const topBuyers = Object.entries(buyerCounts)
+          .sort((a, b) => b[1].count - a[1].count)
+          .slice(0, 10)
+          .map(([id, v], i) => `**#${i + 1}** <@${id}> (${v.username}) — ${v.count} purchase${v.count !== 1 ? 's' : ''}`)
+          .join('\n');
+
+        const recentLines = txs.slice(0, 10).map(tx => {
+          const itemNames = tx.items.map(id => SHOP_ITEMS.find(i => i.id === id)?.label ?? id).join(', ');
+          return `<@${tx.buyerDiscordId}> — ${itemNames} — <t:${Math.floor(tx.purchasedAt.getTime() / 1000)}:R>`;
+        }).join('\n');
+
+        const embed = new EmbedBuilder()
+          .setTitle('📊 Shop Statistics')
+          .addFields(
+            { name: '🗓️ Recent Transactions (last 10)', value: recentLines || 'None' },
+            { name: '🛍️ Sales by Item', value: itemSalesLines },
+            { name: '👑 Top Buyers', value: topBuyers || 'None' },
+          )
+          .setFooter({ text: `${txs.length} total transactions` })
+          .setColor(0xd2a4bf)
+          .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
       }
     } else if (commandName === 'search') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
