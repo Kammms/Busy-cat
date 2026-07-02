@@ -36,6 +36,8 @@ export const shopTransactions = pgTable("shop_transactions", {
   items: text("items").array().notNull(),
   totalMsgCost: integer("total_msg_cost").notNull().default(0),
   totalVcHoursCost: integer("total_vc_hours_cost").notNull().default(0),
+  paymentType: text("payment_type"),
+  buyerBalance: integer("buyer_balance"),
   purchasedAt: timestamp("purchased_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   roleId: text("role_id"),
