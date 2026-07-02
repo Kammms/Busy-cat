@@ -39,10 +39,14 @@ export async function runMigrations() {
         "items" text[] NOT NULL,
         "total_msg_cost" integer DEFAULT 0 NOT NULL,
         "total_vc_hours_cost" integer DEFAULT 0 NOT NULL,
+        "payment_type" text,
+        "buyer_balance" integer,
         "purchased_at" timestamp DEFAULT now() NOT NULL,
         "expires_at" timestamp NOT NULL,
         "role_id" text
       );
+      ALTER TABLE "shop_transactions" ADD COLUMN IF NOT EXISTS "payment_type" text;
+      ALTER TABLE "shop_transactions" ADD COLUMN IF NOT EXISTS "buyer_balance" integer;
 
       CREATE TABLE IF NOT EXISTS "shop_roles" (
         "id" serial PRIMARY KEY NOT NULL,
