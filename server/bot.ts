@@ -11,12 +11,16 @@ import {
   ButtonStyle,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ComponentType,
   REST, 
   Routes, 
   PermissionFlagsBits,
   MessageFlags,
   ChatInputCommandInteraction,
+  ModalSubmitInteraction,
   AuditLogEvent,
   Invite
 } from 'discord.js';
@@ -68,11 +72,24 @@ interface CachedInvite {
   inviterId: string | null;
 }
 
+interface PendingShopPurchase {
+  originalInteraction: ChatInputCommandInteraction;
+  buyerId: string;
+  buyerUsername: string;
+  selectedIds: ShopItemId[];
+  totalMsg: number;
+  totalVc: number;
+  paymentType: 'msg' | 'vc';
+  aboveRoleId?: string;
+  expiresAt: Date;
+}
+
 export class DiscordBot {
   private client: Client;
   private inviteCache: Collection<string, Collection<string, CachedInvite>> = new Collection();
   private isReady: boolean = false;
   private voiceJoinTimes: Map<string, number> = new Map();
+  private pendingShopPurchases = new Map<string, PendingShopPurchase>();
 
   constructor() {
     this.client = new Client({
@@ -333,6 +350,19 @@ export class DiscordBot {
               await interaction.followUp(msg);
             } else {
               await interaction.reply(msg);
+            }
+          } catch {}
+        }
+      } else if (interaction.isModalSubmit()) {
+        try {
+          await this.handleShopModalSubmit(interaction);
+        } catch (err) {
+          console.error('Unhandled modal error:', err);
+          try {
+            if (interaction.replied || interaction.deferred) {
+              await interaction.followUp({ content: '❌ Something went wrong.', flags: MessageFlags.Ephemeral });
+            } else {
+              await interaction.reply({ content: '❌ Something went wrong.', flags: MessageFlags.Ephemeral });
             }
           } catch {}
         }
@@ -1120,24 +1150,31 @@ export class DiscordBot {
             totalVc += prices[id].vc;
           }
 
+          const maxDurationDays = selectedIds.reduce((max, id) => {
+            const days = SHOP_ITEMS.find(i => i.id === id)?.durationDays ?? 7;
+            return Math.max(max, days);
+          }, 7);
+          const expiresAt = new Date(Date.now() + maxDurationDays * 24 * 60 * 60 * 1000);
+
           const itemLines = selectedIds.map(id => {
             const item = SHOP_ITEMS.find(i => i.id === id)!;
             const dur = item.durationDays === 30 ? '1 month' : '1 week';
             return `• ${item.label} *(${dur})* — ${prices[id].msg.toLocaleString()} msgs / ${prices[id].vc}h VC`;
           }).join('\n');
 
-          const confirmEmbed = new EmbedBuilder()
-            .setTitle('🛒 Confirm Purchase')
-            .setDescription(`**Buyer:** <@${buyer.id}>\n\n**Items:**\n${itemLines}\n\n**Total:** ${totalMsg.toLocaleString()} messages or ${totalVc}h of VC`)
+          const summaryEmbed = new EmbedBuilder()
+            .setTitle('🛒 Choose Payment Method')
+            .setDescription(`**Buyer:** <@${buyer.id}>\n\n**Items:**\n${itemLines}\n\n**Cost:** ${totalMsg.toLocaleString()} messages **or** ${totalVc}h of VC`)
             .setColor(0xd2a4bf)
-            .setFooter({ text: 'Funds are assumed to be sufficient.' });
+            .setFooter({ text: 'Select how the buyer is paying — you\'ll enter their balance next.' });
 
-          const confirmRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder().setCustomId('shop_confirm').setLabel('✅ Confirm').setStyle(ButtonStyle.Success),
+          const payRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId('shop_pay_msg').setLabel(`💬 Messages (${totalMsg.toLocaleString()})`).setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('shop_pay_vc').setLabel(`🎤 VC Hours (${totalVc}h)`).setStyle(ButtonStyle.Primary),
             new ButtonBuilder().setCustomId('shop_cancel').setLabel('❌ Cancel').setStyle(ButtonStyle.Secondary),
           );
 
-          await interaction.editReply({ content: '', embeds: [confirmEmbed], components: [confirmRow] });
+          await interaction.editReply({ content: '', embeds: [summaryEmbed], components: [payRow] });
 
           const btnCollector = response.createMessageComponentCollector({
             componentType: ComponentType.Button,
@@ -1151,91 +1188,44 @@ export class DiscordBot {
               return;
             }
 
-            await btn.deferUpdate();
-
             if (btn.customId === 'shop_cancel') {
+              await btn.deferUpdate();
               await interaction.editReply({ content: '❌ Purchase cancelled.', embeds: [], components: [] });
               return;
             }
 
-            // ── Confirm: execute purchase ──────────────────────────────────
-            const guildId = interaction.guildId!;
-            const maxDurationDays = selectedIds.reduce((max, id) => {
-              const days = SHOP_ITEMS.find(i => i.id === id)?.durationDays ?? 7;
-              return Math.max(max, days);
-            }, 7);
-            const expiresAt = new Date(Date.now() + maxDurationDays * 24 * 60 * 60 * 1000);
-            let createdRoleId: string | undefined;
+            const paymentType: 'msg' | 'vc' = btn.customId === 'shop_pay_msg' ? 'msg' : 'vc';
+            const paymentLabel = paymentType === 'msg' ? 'messages' : 'VC hours';
+            const costAmount = paymentType === 'msg' ? totalMsg : totalVc;
 
-            // Create custom role if purchased
-            if (selectedIds.includes('custom_role')) {
-              try {
-                const aboveRoleId = aboveRoleOpt?.id ?? await storage.getSetting(SETTINGS_KEYS.SHOP_ABOVE_ROLE_ID);
-                const aboveRole = aboveRoleId ? interaction.guild!.roles.cache.get(aboveRoleId) : undefined;
-                const newRole = await interaction.guild!.roles.create({
-                  name: `${buyer.username} - shop`,
-                  color: 0x808080,
-                  position: aboveRole ? aboveRole.position + 1 : undefined,
-                  reason: `/shop buy by ${interaction.user.username}`,
-                });
-                createdRoleId = newRole.id;
-                // Give buyer the role
-                const buyerMember = await interaction.guild!.members.fetch(buyer.id).catch(() => null);
-                if (buyerMember) await buyerMember.roles.add(newRole).catch(() => {});
-              } catch (roleErr) {
-                console.error('Failed to create shop role:', roleErr);
-              }
-            }
-
-            // Save transaction
-            const tx = await storage.createShopTransaction({
-              guildId,
-              buyerDiscordId: buyer.id,
+            // Store state for modal submit
+            this.pendingShopPurchases.set(interaction.user.id, {
+              originalInteraction: interaction,
+              buyerId: buyer.id,
               buyerUsername: buyer.username,
-              items: selectedIds,
-              totalMsgCost: totalMsg,
-              totalVcHoursCost: totalVc,
+              selectedIds,
+              totalMsg,
+              totalVc,
+              paymentType,
+              aboveRoleId: aboveRoleOpt?.id,
               expiresAt,
-              roleId: createdRoleId ?? null,
             });
 
-            // Save role for expiry tracking
-            if (createdRoleId) {
-              await storage.createShopRole({
-                transactionId: tx.id,
-                guildId,
-                roleId: createdRoleId,
-                buyerDiscordId: buyer.id,
-                expiresAt,
-                expired: false,
-              });
-            }
+            const modal = new ModalBuilder()
+              .setCustomId('shop_balance_modal')
+              .setTitle('Buyer Balance')
+              .addComponents(
+                new ActionRowBuilder<TextInputBuilder>().addComponents(
+                  new TextInputBuilder()
+                    .setCustomId('buyer_balance')
+                    .setLabel(`How many ${paymentLabel} did ${buyer.username} have?`)
+                    .setStyle(TextInputStyle.Short)
+                    .setPlaceholder(`e.g. ${(costAmount * 2).toLocaleString()}`)
+                    .setRequired(true)
+                )
+              );
 
-            // Send receipt to shop channel
-            const shopChannelId = await storage.getSetting(SETTINGS_KEYS.SHOP_CHANNEL_ID);
-            const shopChannel = shopChannelId
-              ? (interaction.guild!.channels.cache.get(shopChannelId) as TextChannel | undefined)
-              : (interaction.channel as TextChannel);
-
-            const itemNameList = selectedIds.map(id => SHOP_ITEMS.find(i => i.id === id)!.label).join(', ');
-            const receiptEmbed = new EmbedBuilder()
-              .setTitle('🧾 Shop Receipt')
-              .setDescription(
-                `<@${buyer.id}> bought **${itemNameList}** for ` +
-                `**${totalMsg.toLocaleString()} messages** or **${totalVc}h of VC**` +
-                (createdRoleId ? `\n\n🎨 Role created: <@&${createdRoleId}>` : '')
-              )
-              .addFields({ name: 'Expires', value: `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>`, inline: true })
-              .setColor(0xd2a4bf)
-              .setTimestamp();
-
-            if (shopChannel) await shopChannel.send({ embeds: [receiptEmbed] }).catch(() => {});
-
-            await interaction.editReply({
-              content: `✅ Purchase recorded! Receipt sent${shopChannel ? ` to <#${shopChannel.id}>` : ''}.`,
-              embeds: [],
-              components: [],
-            });
+            await btn.showModal(modal);
           });
 
           btnCollector.on('end', async (collected) => {
@@ -1661,6 +1651,98 @@ export class DiscordBot {
 
     await channel.send({ embeds: [totalEmbed] });
     return true;
+  }
+
+  private async handleShopModalSubmit(interaction: ModalSubmitInteraction) {
+    if (interaction.customId !== 'shop_balance_modal') return;
+
+    const pending = this.pendingShopPurchases.get(interaction.user.id);
+    if (!pending) {
+      await interaction.reply({ content: '❌ No pending purchase found. Please start over with `/shop buy`.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    this.pendingShopPurchases.delete(interaction.user.id);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const balanceRaw = interaction.fields.getTextInputValue('buyer_balance');
+    const buyerBalance = parseInt(balanceRaw.replace(/[^0-9]/g, ''), 10);
+    if (isNaN(buyerBalance) || buyerBalance < 0) {
+      await interaction.editReply({ content: '❌ Invalid balance — please enter a number.' });
+      return;
+    }
+
+    const { originalInteraction, buyerId, buyerUsername, selectedIds, totalMsg, totalVc, paymentType, aboveRoleId, expiresAt } = pending;
+    const guild = originalInteraction.guild!;
+    const guildId = originalInteraction.guildId!;
+
+    let createdRoleId: string | undefined;
+    if (selectedIds.includes('custom_role')) {
+      try {
+        const aboveRoleSettingId = aboveRoleId ?? await storage.getSetting(SETTINGS_KEYS.SHOP_ABOVE_ROLE_ID);
+        const aboveRole = aboveRoleSettingId ? guild.roles.cache.get(aboveRoleSettingId) : undefined;
+        const newRole = await guild.roles.create({
+          name: `${buyerUsername} - shop`,
+          color: 0x808080,
+          position: aboveRole ? aboveRole.position + 1 : undefined,
+          reason: `/shop buy by ${interaction.user.username}`,
+        });
+        createdRoleId = newRole.id;
+        const buyerMember = await guild.members.fetch(buyerId).catch(() => null);
+        if (buyerMember) await buyerMember.roles.add(newRole).catch(() => {});
+      } catch (roleErr) {
+        console.error('Failed to create shop role:', roleErr);
+      }
+    }
+
+    const tx = await storage.createShopTransaction({
+      guildId,
+      buyerDiscordId: buyerId,
+      buyerUsername,
+      items: selectedIds,
+      totalMsgCost: totalMsg,
+      totalVcHoursCost: totalVc,
+      paymentType,
+      buyerBalance,
+      expiresAt,
+      roleId: createdRoleId ?? null,
+    });
+
+    if (createdRoleId) {
+      await storage.createShopRole({
+        transactionId: tx.id,
+        guildId,
+        roleId: createdRoleId,
+        buyerDiscordId: buyerId,
+        expiresAt,
+        expired: false,
+      });
+    }
+
+    const shopChannelId = await storage.getSetting(SETTINGS_KEYS.SHOP_CHANNEL_ID);
+    const shopChannel = shopChannelId
+      ? (guild.channels.cache.get(shopChannelId) as TextChannel | undefined)
+      : (originalInteraction.channel as TextChannel);
+
+    const itemNameList = selectedIds.map(id => SHOP_ITEMS.find(i => i.id === id)!.label).join(', ');
+    const costPaid = paymentType === 'msg'
+      ? `**${totalMsg.toLocaleString()} messages** (balance: ${buyerBalance.toLocaleString()})`
+      : `**${totalVc}h of VC** (balance: ${buyerBalance}h)`;
+
+    const receiptEmbed = new EmbedBuilder()
+      .setTitle('🧾 Shop Receipt')
+      .setDescription(
+        `<@${buyerId}> bought **${itemNameList}**\n` +
+        `Paid with: ${costPaid}` +
+        (createdRoleId ? `\n\n🎨 Role created: <@&${createdRoleId}>` : '')
+      )
+      .addFields({ name: 'Expires', value: `<t:${Math.floor(expiresAt.getTime() / 1000)}:R>`, inline: true })
+      .setColor(0xd2a4bf)
+      .setTimestamp();
+
+    if (shopChannel) await shopChannel.send({ embeds: [receiptEmbed] }).catch(() => {});
+
+    await originalInteraction.editReply({ content: `Done! Receipt sent${shopChannel ? ` to <#${shopChannel.id}>` : ''}.`, embeds: [], components: [] }).catch(() => {});
+    await interaction.editReply({ content: 'Purchase recorded!' });
   }
 
   public async start(token: string) {
