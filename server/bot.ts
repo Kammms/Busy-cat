@@ -684,10 +684,16 @@ export class DiscordBot {
 
     const rest = new REST({ version: '10' }).setToken(this.client.token!);
 
+    const guildId = this.client.guilds.cache.first()?.id;
+    if (!guildId) {
+      console.error('No guild found — cannot register guild commands.');
+      return;
+    }
+
     try {
       console.log('Started refreshing application (/) commands.');
       await rest.put(
-        Routes.applicationCommands(this.client.user.id),
+        Routes.applicationGuildCommands(this.client.user.id, guildId),
         { body: commands },
       );
       console.log('Successfully reloaded application (/) commands.');
