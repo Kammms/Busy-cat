@@ -612,6 +612,11 @@ export class DiscordBot {
         .addStringOption(opt => opt.setName('message').setDescription('The message content').setRequired(true))
         .addBooleanOption(opt => opt.setName('mention_sender').setDescription('Prefix the message with "user said:"').setRequired(false)),
       new SlashCommandBuilder()
+        .setName('privacy')
+        .setDescription('View the bot\'s privacy policy')
+        .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+        .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]),
+      new SlashCommandBuilder()
         .setName('servers')
         .setDescription('List all servers using this bot with invite links')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -1433,25 +1438,62 @@ export class DiscordBot {
     } else if (commandName === 'say') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const message = options.getString('message', true);
-      const targetChannel = (options.getChannel('channel') as TextChannel | null) ?? (interaction.channel as TextChannel);
       const mentionSender = options.getBoolean('mention_sender') ?? false;
-
-      if (!targetChannel || !targetChannel.isTextBased()) {
-        await interaction.editReply({ content: '❌ Invalid channel.' });
-        return;
-      }
 
       const content = mentionSender
         ? `${interaction.user} said: ${message}`
         : message;
 
       try {
-        await targetChannel.send({ content });
-        await interaction.editReply({ content: `✅ Message sent to <#${targetChannel.id}>.` });
+        // Use a public follow-up instead of channel.send() — this works via the
+        // interaction webhook even in DMs/user-app contexts where the bot has
+        // no direct channel access or membership.
+        await interaction.followUp({ content });
+        await interaction.editReply({ content: '✅ Message sent.' });
       } catch (err) {
         console.error('Failed to send /say message:', err);
-        await interaction.editReply({ content: "❌ Couldn't send the message. Check my permissions in that channel." });
+        await interaction.editReply({ content: "❌ Couldn't send the message." });
       }
+    } else if (commandName === 'privacy') {
+      const privacyEmbed = new EmbedBuilder()
+        .setTitle('🔒 Privacy Policy')
+        .setColor(0xd2a4bf)
+        .setDescription(
+          "This bot tracks moderator activity and manages a points‑based leaderboard, as well as shop " +
+          "transactions performed by moderators on behalf of server members. All data processing is " +
+          "limited to what is required for these features to function.\n\n" +
+          "**Data We Collect**\n" +
+          "The bot only collects and processes Discord‑provided data necessary for activity tracking and shop management:\n" +
+          "• Discord user IDs and usernames of tracked moderators and shop buyers\n" +
+          "• Message counts, voice channel activity hours, and invite counts within servers where the bot is active\n" +
+          "• Points, manual point adjustments, and leaderboard rankings\n" +
+          "• Shop purchase records, including items bought, payment type, reported balance, and role/expiry information\n\n" +
+          "The bot does not collect any personal information outside of Discord's API.\n\n" +
+          "**How We Use the Data**\n" +
+          "Collected data is used exclusively for:\n" +
+          "• Calculating and displaying moderator points and leaderboards\n" +
+          "• Managing shop purchases and automatically expiring temporary roles\n" +
+          "• Allowing server administrators to configure, review, and audit activity tracking and shop logs through the dashboard or bot commands\n\n" +
+          "All processing is strictly limited to the bot's functionality inside Discord.\n\n" +
+          "**What We Don't Do**\n" +
+          "To protect user privacy, the bot explicitly does not:\n" +
+          "• Read, store, or analyze the content of member messages — only numerical activity counts\n" +
+          "• Access or store direct messages (DMs)\n" +
+          "• Share, sell, or transfer data to third parties\n" +
+          "• Use any collected data for advertising, analytics, or profiling\n" +
+          "• Monetize any feature — the bot is fully funded and maintained by its creator, and no payments or donations are required or accepted\n\n" +
+          "**Data Retention & Removal**\n" +
+          "Data is retained only while the bot remains active in a server.\n" +
+          "• Server administrators may exclude a moderator from tracking at any time using `/set exclude`.\n" +
+          "• Users or moderators may request deletion of their stored data by contacting the server administrator responsible for managing the bot.\n" +
+          "• If the bot is removed from a server, all associated data is deleted as part of the cleanup process.\n\n" +
+          "**Contact**\n" +
+          "For questions or data‑related requests, please contact the server administrator or the bot owner."
+        )
+        .setFooter({ text: 'Last updated' })
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [privacyEmbed] });
     } else if (commandName === 'servers') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const guilds = this.client.guilds.cache;
