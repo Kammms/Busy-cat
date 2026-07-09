@@ -384,7 +384,7 @@ export class DiscordBot {
       if (!member?.roles.cache.has(modRoleId)) return;
 
       let moderator = await storage.getModeratorByDiscordId(message.author.id);
-      
+
       if (!moderator) {
         moderator = await storage.createModerator({
           discordId: message.author.id,
@@ -436,9 +436,9 @@ export class DiscordBot {
     this.client.on('guildMemberAdd', async (member) => {
       const guild = member.guild;
       const cachedInvites = this.inviteCache.get(guild.id);
-      
+
       const newInvites = await guild.invites.fetch().catch(() => new Collection<string, Invite>());
-      
+
       const usedInvite = newInvites.find((inv: Invite) => {
         const cached = cachedInvites?.get(inv.code);
         return cached ? (inv.uses || 0) > (cached.uses || 0) : false;
@@ -448,10 +448,10 @@ export class DiscordBot {
         const modRoleId = await storage.getSetting(SETTINGS_KEYS.MODERATOR_ROLE_ID);
         try {
           const inviterMember = await guild.members.fetch(usedInvite.inviter.id);
-          
+
           if (modRoleId && inviterMember.roles.cache.has(modRoleId)) {
              let moderator = await storage.getModeratorByDiscordId(usedInvite.inviter.id);
-             
+
              if (moderator && !moderator.isIgnored) {
                await storage.updateModerator(moderator.id, {
                  inviteCount: (moderator.inviteCount || 0) + 1
@@ -465,13 +465,13 @@ export class DiscordBot {
 
       this.inviteCache.set(guild.id, this.cacheInvites(newInvites));
     });
-    
+
     this.client.on('inviteCreate', async (invite) => {
       if (invite.guild) {
         await this.refreshInviteCacheForGuild(invite.guild.id);
       }
     });
-    
+
     this.client.on('inviteDelete', async (invite) => {
       if (invite.guild) {
         await this.refreshInviteCacheForGuild(invite.guild.id);
@@ -842,7 +842,7 @@ export class DiscordBot {
         const r1 = options.getInteger('rank1');
         const r2 = options.getInteger('rank2');
         const r3 = options.getInteger('rank3');
-        
+
         if (points !== null) await storage.updateSetting(SETTINGS_KEYS.POINTS_PER_MSG, points.toString());
         if (threshold !== null) await storage.updateSetting(SETTINGS_KEYS.MESSAGE_THRESHOLD, threshold.toString());
         if (invites !== null) await storage.updateSetting(SETTINGS_KEYS.POINTS_PER_INVITE, invites.toString());
@@ -854,7 +854,7 @@ export class DiscordBot {
           if (r3 !== null) currentRewards[2] = r3;
           await storage.updateSetting(SETTINGS_KEYS.LEADERBOARD_REWARDS, currentRewards.join(','));
         }
-        
+
         await interaction.editReply({ content: `✅ Point values updated.` });
       } else if (sub === 'shop') {
         const allowedRole = options.getRole('allowed_role');
@@ -885,7 +885,7 @@ export class DiscordBot {
     } else if (commandName === 'exclude') {
       const user = options.getUser('user', true);
       let moderator = await storage.getModeratorByDiscordId(user.id);
-      
+
       if (!moderator) {
         moderator = await storage.createModerator({
           discordId: user.id,
@@ -897,12 +897,12 @@ export class DiscordBot {
       } else {
         await storage.updateModerator(moderator.id, { isIgnored: true });
       }
-      
+
       await interaction.editReply({ content: `✅ <@${user.id}> has been excluded from tracking.` });
     } else if (commandName === 'include') {
       const user = options.getUser('user', true);
       let moderator = await storage.getModeratorByDiscordId(user.id);
-      
+
       if (moderator) {
         await storage.updateModerator(moderator.id, { isIgnored: false });
         await interaction.editReply({ content: `✅ <@${user.id}> has been included back in tracking.` });
@@ -913,7 +913,7 @@ export class DiscordBot {
       const user = options.getUser('user', true);
       const amount = options.getInteger('amount', true);
       const reason = options.getString('reason') || 'No reason provided';
-      
+
       let mod = await storage.getModeratorByDiscordId(user.id);
       if (!mod) {
         mod = await storage.createModerator({
@@ -926,30 +926,30 @@ export class DiscordBot {
       } else {
         await storage.updateModerator(mod.id, { manualPoints: mod.manualPoints + amount });
       }
-      
+
       await interaction.editReply({ content: `✅ Added **${amount}** points to <@${user.id}>. Reason: ${reason}` });
     } else if (commandName === 'addpoints-all') {
       const amount = options.getInteger('amount', true);
       const reason = options.getString('reason') || 'No reason provided';
-      
+
       const moderators = await storage.getModerators();
       const activeMods = moderators.filter(m => !m.isIgnored);
-      
+
       for (const mod of activeMods) {
         await storage.updateModerator(mod.id, { manualPoints: mod.manualPoints + amount });
       }
-      
+
       await interaction.editReply({ content: `✅ Added **${amount}** points to **${activeMods.length}** tracked moderators. Reason: ${reason}` });
     } else if (commandName === 'removepoints') {
       const user = options.getUser('user', true);
       const amount = options.getInteger('amount', true);
       const reason = options.getString('reason') || 'No reason provided';
-      
+
       let mod = await storage.getModeratorByDiscordId(user.id);
       if (!mod) {
         return interaction.editReply({ content: "❌ This user is not a tracked moderator." });
       }
-      
+
       await storage.updateModerator(mod.id, { manualPoints: mod.manualPoints - amount });
       await interaction.editReply({ content: `✅ Removed **${amount}** points from <@${user.id}>. Reason: ${reason}` });
     } else if (commandName === 'adjust') {
@@ -1552,15 +1552,15 @@ export class DiscordBot {
         const id = options.getInteger('id', true);
         const name = options.getString('name');
         const points = options.getInteger('points');
-        
+
         const existing = await storage.getModRanks();
         const rank = existing.find(r => r.id === id);
         if (!rank) return interaction.editReply({ content: `❌ Rank with ID **${id}** not found. Use \`/ranks list\` to see valid IDs.` });
-        
+
         const updates: any = {};
         if (name) updates.name = name;
         if (points !== null) updates.requiredPoints = points;
-        
+
         await storage.updateModRank(id, updates);
         await interaction.editReply({ content: `✅ Rank **${id}** updated.` });
       } else if (sub === 'remove') {
@@ -1568,19 +1568,19 @@ export class DiscordBot {
         const existing = await storage.getModRanks();
         const rank = existing.find(r => r.id === id);
         if (!rank) return interaction.editReply({ content: `❌ Rank with ID **${id}** not found.` });
-        
+
         await storage.deleteModRank(id);
         await interaction.editReply({ content: `✅ Rank **${id}** (**${rank.name}**) removed.` });
       } else if (sub === 'list') {
         const ranks = await storage.getModRanks();
         if (ranks.length === 0) return interaction.editReply({ content: "No ranks configured. Use \`/ranks add\` to create one." });
-        
+
         const embed = new EmbedBuilder()
           .setTitle("🎖 Configured Moderator Ranks")
           .setColor(0xd2a4bf)
           .setDescription(ranks.map(r => `ID: \`${r.id}\` | **${r.name}** | Points: \`${r.requiredPoints}\``).join('\n'))
           .setFooter({ text: "Use these IDs with modify/remove commands" });
-          
+
         await interaction.editReply({ embeds: [embed] });
       }
     } else if (commandName === 'stats') {
@@ -1754,7 +1754,7 @@ export class DiscordBot {
     });
     return cache;
   }
-  
+
   private async refreshInviteCacheForGuild(guildId: string) {
     try {
       const guild = await this.client.guilds.fetch(guildId);
@@ -1786,7 +1786,7 @@ export class DiscordBot {
     const moderators = await storage.getModerators();
     const ranks = await storage.getModRanks();
     const modRoleId = await storage.getSetting(SETTINGS_KEYS.MODERATOR_ROLE_ID);
-    
+
     // Filter active mods (must be in guild and have role)
     const activeMods = [];
     if (modRoleId) {
