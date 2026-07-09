@@ -610,7 +610,6 @@ export class DiscordBot {
         .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
         .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel])
         .addStringOption(opt => opt.setName('message').setDescription('The message content').setRequired(true))
-        .addChannelOption(opt => opt.setName('channel').setDescription('Channel to send to (defaults to current channel)').setRequired(false))
         .addBooleanOption(opt => opt.setName('mention_sender').setDescription('Prefix the message with "user said:"').setRequired(false)),
       new SlashCommandBuilder()
         .setName('servers')
