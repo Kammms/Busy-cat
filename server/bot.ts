@@ -22,7 +22,9 @@ import {
   ChatInputCommandInteraction,
   ModalSubmitInteraction,
   AuditLogEvent,
-  Invite
+  Invite,
+  ApplicationIntegrationType,
+  InteractionContextType
 } from 'discord.js';
 import { storage } from './storage';
 import { SETTINGS_KEYS } from '@shared/schema';
@@ -605,6 +607,8 @@ export class DiscordBot {
         .setName('say')
         .setDescription('Make the bot send a message')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+        .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel])
         .addStringOption(opt => opt.setName('message').setDescription('The message content').setRequired(true))
         .addChannelOption(opt => opt.setName('channel').setDescription('Channel to send to (defaults to current channel)').setRequired(false))
         .addBooleanOption(opt => opt.setName('mention_sender').setDescription('Prefix the message with "user said:"').setRequired(false)),
@@ -1770,8 +1774,8 @@ export class DiscordBot {
 
     if (shopChannel) await shopChannel.send({ embeds: [receiptEmbed] }).catch(() => {});
 
-    await originalInteraction.editReply({ content: `Done! Receipt sent${shopChannel ? ` to <#${shopChannel.id}>` : ''}.`, embeds: [], components: [] }).catch(() => {});
-    await interaction.editReply({ content: 'Purchase recorded!' });
+    await originalInteraction.editReply({ content: `✅ Done! Receipt sent${shopChannel ? ` to <#${shopChannel.id}>` : ''}.`, embeds: [], components: [] }).catch(() => {});
+    await interaction.editReply({ content: '✅ Purchase recorded!' });
   }
 
   public async start(token: string) {
