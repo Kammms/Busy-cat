@@ -676,6 +676,10 @@ export class DiscordBot {
           sub.setName('list')
             .setDescription('List all moderator ranks')
         ),
+      new SlashCommandBuilder()
+        .setName('config')
+        .setDescription('View all current bot configuration in one place')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     ].map(cmd => cmd.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(this.client.token!);
@@ -760,7 +764,7 @@ export class DiscordBot {
     // visibility for already-deferred interactions is fixed at defer time.
     if (commandName === 'set' || commandName === 'exclude' || commandName === 'include'
       || commandName === 'addpoints' || commandName === 'addpoints-all' || commandName === 'removepoints'
-      || commandName === 'adjust' || commandName === 'balance' || commandName === 'ranks') {
+      || commandName === 'adjust' || commandName === 'balance' || commandName === 'ranks' || commandName === 'config') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     }
 
@@ -1632,6 +1636,117 @@ export class DiscordBot {
         .setColor(0xd2a4bf);
 
       await interaction.editReply({ embeds: [embed] });
+    } else if (commandName === 'config') {
+      const modRoleId = await storage.getSetting(SETTINGS_KEYS.MODERATOR_ROLE_ID);
+      const trackedChannelId = await storage.getSetting(SETTINGS_KEYS.TRACKED_CHANNEL_ID);
+      const ptsPerMsg = await storage.getSetting(SETTINGS_KEYS.POINTS_PER_MSG) || '15';
+      const threshold = await storage.getSetting(SETTINGS_KEYS.MESSAGE_THRESHOLD) || '1000';
+      const ptsPerInvite = await storage.getSetting(SETTINGS_KEYS.POINTS_PER_INVITE) || '1';
+      const ptsPerVoiceHour = await storage.getSetting(SETTINGS_KEYS.POINTS_PER_VOICE_HOUR) || '5';
+      const rewards = (await storage.getSetting(SETTINGS_KEYS.LEADERBOARD_REWARDS) || '40,30,20').split(',');
+
+      const genderRoleIds = (await storage.getSetting(SETTINGS_KEYS.GENDER_ROLE_IDS) || '').split(',').filter(Boolean);
+      const genderLogId = await storage.getSetting(SETTINGS_KEYS.GENDER_LOG_CHANNEL_ID);
+      const genderExposeId = await storage.getSetting(SETTINGS_KEYS.GENDER_EXPOSE_CHANNEL_ID);
+      const genderBypassId = await storage.getSetting(SETTINGS_KEYS.GENDER_BYPASS_ROLE_ID);
+
+      const ageMinorIds = (await storage.getSetting(SETTINGS_KEYS.AGE_MINOR_ROLE_IDS) || '').split(',').filter(Boolean);
+      const ageAdultId = await storage.getSetting(SETTINGS_KEYS.AGE_ADULT_ROLE_ID);
+      const ageLogId = await storage.getSetting(SETTINGS_KEYS.AGE_LOG_CHANNEL_ID);
+      const ageExposeId = await storage.getSetting(SETTINGS_KEYS.AGE_EXPOSE_CHANNEL_ID);
+      const ageBypassId = await storage.getSetting(SETTINGS_KEYS.AGE_BYPASS_ROLE_ID);
+
+      const shopAllowedRoleId = await storage.getSetting(SETTINGS_KEYS.SHOP_ALLOWED_ROLE_ID);
+      const shopChannelId = await storage.getSetting(SETTINGS_KEYS.SHOP_CHANNEL_ID);
+      const shopAboveRoleId = await storage.getSetting(SETTINGS_KEYS.SHOP_ABOVE_ROLE_ID);
+      const prices = await getShopPrices();
+
+      const ranks = await storage.getModRanks();
+      const allMods = await storage.getModerators();
+      const trackedMods = allMods.filter(m => !m.isIgnored);
+      const excludedMods = allMods.filter(m => m.isIgnored);
+
+      const generalEmbed = new EmbedBuilder()
+        .setTitle('⚙️ General & Tracking')
+        .setColor(0xd2a4bf)
+        .addFields(
+          { name: 'Mod Team Role', value: modRoleId ? `<@&${modRoleId}>` : 'Not set', inline: true },
+          { name: 'Tracked Channel', value: trackedChannelId ? `<#${trackedChannelId}>` : 'Not set', inline: true },
+          { name: '\u200b', value: '\u200b', inline: true },
+          { name: 'Points / Msg Threshold', value: ptsPerMsg, inline: true },
+          { name: 'Message Threshold', value: threshold, inline: true },
+          { name: '\u200b', value: '\u200b', inline: true },
+          { name: 'Points / Invite', value: ptsPerInvite, inline: true },
+          { name: 'Points / VC Hour', value: ptsPerVoiceHour, inline: true },
+          { name: '\u200b', value: '\u200b', inline: true },
+          { name: 'Leaderboard Rewards', value: `🥇 ${rewards[0] ?? 40} | 🥈 ${rewards[1] ?? 30} | 🥉 ${rewards[2] ?? 20}`, inline: false },
+        );
+
+      const protectionEmbed = new EmbedBuilder()
+        .setTitle('🛡️ Gender & Age Protection')
+        .setColor(0xd2a4bf)
+        .addFields(
+          { name: 'Gender Roles', value: genderRoleIds.length ? genderRoleIds.map(id => `<@&${id}>`).join(', ') : 'Not set', inline: false },
+          { name: 'Gender Log Channel', value: genderLogId ? `<#${genderLogId}>` : 'Not set', inline: true },
+          { name: 'Gender Expose Channel', value: genderExposeId ? `<#${genderExposeId}>` : 'Not set', inline: true },
+          { name: 'Gender Bypass Role', value: genderBypassId ? `<@&${genderBypassId}>` : 'Not set', inline: true },
+          { name: 'Minor Roles', value: ageMinorIds.length ? ageMinorIds.map(id => `<@&${id}>`).join(', ') : 'Not set', inline: false },
+          { name: 'Adult Role', value: ageAdultId ? `<@&${ageAdultId}>` : 'Not set', inline: true },
+          { name: 'Age Log Channel', value: ageLogId ? `<#${ageLogId}>` : 'Not set', inline: true },
+          { name: 'Age Expose Channel', value: ageExposeId ? `<#${ageExposeId}>` : 'Not set', inline: true },
+          { name: 'Age Bypass Role', value: ageBypassId ? `<@&${ageBypassId}>` : 'Not set', inline: true },
+        );
+
+      const shopEmbed = new EmbedBuilder()
+        .setTitle('🛒 Shop Settings & Prices')
+        .setColor(0xd2a4bf)
+        .addFields(
+          { name: 'Allowed Role', value: shopAllowedRoleId ? `<@&${shopAllowedRoleId}>` : 'Not set', inline: true },
+          { name: 'Receipt Channel', value: shopChannelId ? `<#${shopChannelId}>` : 'Not set', inline: true },
+          { name: 'Roles Placed Above', value: shopAboveRoleId ? `<@&${shopAboveRoleId}>` : 'Not set', inline: true },
+          {
+            name: 'Prices',
+            value: SHOP_ITEMS.map(item => `${item.label}: **${prices[item.id].msg.toLocaleString()}** msgs / **${prices[item.id].vc}h** VC`).join('\n'),
+            inline: false,
+          },
+        );
+
+      const ranksEmbed = new EmbedBuilder()
+        .setTitle('🎖 Moderator Ranks')
+        .setColor(0xd2a4bf)
+        .setDescription(
+          ranks.length
+            ? ranks.map(r => `ID: \`${r.id}\` | **${r.name}** | Points: \`${r.requiredPoints}\``).join('\n')
+            : 'No ranks configured.'
+        );
+
+      const MAX_LIST = 25;
+      const trackedList = trackedMods
+        .slice(0, MAX_LIST)
+        .map(m => `<@${m.discordId}> — Manual: ${m.manualPoints}`)
+        .join('\n') || 'None';
+      const excludedList = excludedMods
+        .slice(0, MAX_LIST)
+        .map(m => `<@${m.discordId}>`)
+        .join('\n') || 'None';
+
+      const membersEmbed = new EmbedBuilder()
+        .setTitle('👥 Tracked & Excluded Members')
+        .setColor(0xd2a4bf)
+        .addFields(
+          {
+            name: `Tracked Moderators (${trackedMods.length}${trackedMods.length > MAX_LIST ? `, showing first ${MAX_LIST}` : ''})`,
+            value: trackedList,
+            inline: false,
+          },
+          {
+            name: `Excluded Members (${excludedMods.length}${excludedMods.length > MAX_LIST ? `, showing first ${MAX_LIST}` : ''})`,
+            value: excludedList,
+            inline: false,
+          },
+        );
+
+      await interaction.editReply({ embeds: [generalEmbed, protectionEmbed, shopEmbed, ranksEmbed, membersEmbed] });
     }
   }
 
