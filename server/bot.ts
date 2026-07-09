@@ -757,16 +757,11 @@ export class DiscordBot {
   private async handleInteraction(interaction: ChatInputCommandInteraction) {
     const { commandName, options } = interaction;
 
-    // Acknowledge immediately for every command to avoid the 3s Discord
-    // interaction timeout ("Unknown interaction" / 10062) — must happen
-    // before any async work (DB calls, etc). Branches that need a public
-    // (non-ephemeral) reply pass `false` further down via editReply content only;
-    // visibility for already-deferred interactions is fixed at defer time.
-    if (commandName === 'set' || commandName === 'exclude' || commandName === 'include'
-      || commandName === 'addpoints' || commandName === 'addpoints-all' || commandName === 'removepoints'
-      || commandName === 'adjust' || commandName === 'balance' || commandName === 'ranks' || commandName === 'config') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    }
+    // Acknowledge immediately for EVERY command to avoid the 3-second Discord
+    // interaction timeout ("Unknown interaction" / 10062). This must happen
+    // before any async work (DB calls, API requests, etc.). All handlers use
+    // editReply / followUp since the interaction is already deferred here.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (commandName === 'set') {
       const sub = options.getSubcommand();
@@ -1018,7 +1013,6 @@ export class DiscordBot {
 
       await interaction.editReply({ content: `Your current total balance is **${totalPoints}** points.` });
     } else if (commandName === 'inrole') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const role1 = options.getRole('role1', true);
         const role2 = options.getRole('role2');
@@ -1115,7 +1109,6 @@ export class DiscordBot {
       }
     } else if (commandName === 'shop') {
       const sub = options.getSubcommand();
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       // Permission check — allowed role or Administrator
       const shopAllowedRoleId = await storage.getSetting(SETTINGS_KEYS.SHOP_ALLOWED_ROLE_ID);
@@ -1268,7 +1261,6 @@ export class DiscordBot {
         });
 
       } else if (sub === 'stats') {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const guildId = interaction.guildId!;
         const txs = await storage.getShopTransactions(guildId, 100);
 
@@ -1321,7 +1313,6 @@ export class DiscordBot {
         await interaction.editReply({ embeds: [embed] });
       }
     } else if (commandName === 'search') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const targetUser = options.getUser('user', true);
         const searchChannel = options.getChannel('channel', true);
@@ -1447,7 +1438,6 @@ export class DiscordBot {
         await interaction.editReply({ content: '❌ Something went wrong during the search.' });
       }
     } else if (commandName === 'say') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const message = options.getString('message', true);
       const mentionSender = options.getBoolean('mention_sender') ?? false;
 
@@ -1504,9 +1494,8 @@ export class DiscordBot {
         .setFooter({ text: 'Last updated' })
         .setTimestamp();
 
-      await interaction.reply({ embeds: [privacyEmbed] });
+      await interaction.editReply({ embeds: [privacyEmbed] });
     } else if (commandName === 'servers') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const guilds = this.client.guilds.cache;
       const lines: string[] = [];
 
@@ -1535,7 +1524,6 @@ export class DiscordBot {
 
       await interaction.editReply({ embeds: [embed] });
     } else if (commandName === 'leaderboard') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         if (interaction.channel instanceof TextChannel) {
           await this.generateLeaderboard(interaction.channel);
@@ -1590,7 +1578,6 @@ export class DiscordBot {
         await interaction.editReply({ embeds: [embed] });
       }
     } else if (commandName === 'stats') {
-      await interaction.deferReply();
       const user = options.getUser('user') || interaction.user;
       const mod = await storage.getModeratorByDiscordId(user.id);
 
