@@ -602,6 +602,13 @@ export class DiscordBot {
         .setName('leaderboard')
         .setDescription('View leaderboard'),
       new SlashCommandBuilder()
+        .setName('say')
+        .setDescription('Make the bot send a message')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(opt => opt.setName('message').setDescription('The message content').setRequired(true))
+        .addChannelOption(opt => opt.setName('channel').setDescription('Channel to send to (defaults to current channel)').setRequired(false))
+        .addBooleanOption(opt => opt.setName('mention_sender').setDescription('Prefix the message with "user said:"').setRequired(false)),
+      new SlashCommandBuilder()
         .setName('servers')
         .setDescription('List all servers using this bot with invite links')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -1419,6 +1426,28 @@ export class DiscordBot {
       } catch (err) {
         console.error('Error in /search:', err);
         await interaction.editReply({ content: '❌ Something went wrong during the search.' });
+      }
+    } else if (commandName === 'say') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const message = options.getString('message', true);
+      const targetChannel = (options.getChannel('channel') as TextChannel | null) ?? (interaction.channel as TextChannel);
+      const mentionSender = options.getBoolean('mention_sender') ?? false;
+
+      if (!targetChannel || !targetChannel.isTextBased()) {
+        await interaction.editReply({ content: '❌ Invalid channel.' });
+        return;
+      }
+
+      const content = mentionSender
+        ? `${interaction.user} said: ${message}`
+        : message;
+
+      try {
+        await targetChannel.send({ content });
+        await interaction.editReply({ content: `✅ Message sent to <#${targetChannel.id}>.` });
+      } catch (err) {
+        console.error('Failed to send /say message:', err);
+        await interaction.editReply({ content: "❌ Couldn't send the message. Check my permissions in that channel." });
       }
     } else if (commandName === 'servers') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
